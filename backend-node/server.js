@@ -3,6 +3,11 @@ const cors = require('cors');
 const path = require('path'); // Necesario para la ruta a la DB
 const sqlite3 = require('sqlite3').verbose(); // verbose() para más detalles en errores
 
+//Importaciones
+
+// --- Importar funciones de db_operations.js ---
+const { consultarStockMateriasPrimas } = require('./db_operations.js'); 
+
 const app = express();
 const PORT = process.env.PORT || 5002; // Usamos 5002 para evitar conflictos
 
@@ -30,14 +35,15 @@ const db = new sqlite3.Database(dbPath, (err) => {
     } else {
         console.log("Conectado a la base de datos SQLite.");
         // Aquí podríamos llamar a una función para crear tablas si no existen
-        // crearTablasSiNoExisten();
+        crearTablasSiNoExisten();
     }
 });
 
-// Función para crear tablas (similar a tu database.py inicial)
-// La adaptaremos más adelante con tu esquema completo
+
 function crearTablasSiNoExisten() {
     db.serialize(() => {
+        console.log("Verificando/Creando tablas esenciales...");
+
         db.run(`CREATE TABLE IF NOT EXISTS PedidosProveedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             numero_factura TEXT NOT NULL UNIQUE,
@@ -52,14 +58,101 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla PedidosProveedores verificada/creada.");
         });
 
-        // ... Aquí añadirías la creación del resto de tus tablas ...
-        // StockMateriasPrimas, GastosPedido, Configuracion, etc.
-        // Por ahora, dejamos solo una para el ejemplo.
+        // --- Tabla: LineasPedido ---
+        db.run(`CREATE TABLE IF NOT EXISTS LineasPedido (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pedido_id INTEGER NOT NULL,
+            descripcion_original TEXT,
+            cantidad_original REAL NOT NULL,
+            unidad_original TEXT NOT NULL,
+            precio_unitario_original REAL NOT NULL,
+            moneda_original TEXT CHECK(moneda_original IN ('USD', 'EUR')),
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
+        )`, (err) => {
+            if (err) console.error("Error creando tabla LineasPedido:", err.message);
+            else console.log("Tabla LineasPedido verificada/creada.");
+        });
+
+        // --- Tabla: GastosPedido ---
+        db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pedido_id INTEGER NOT NULL,
+            tipo_gasto TEXT CHECK(tipo_gasto IN ('SUPLIDOS', 'EXENTO', 'SUJETO', 'NACIONAL', 'OTRO')),
+            descripcion TEXT NOT NULL,
+            coste_eur REAL NOT NULL,
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
+        )`, (err) => {
+            if (err) console.error("Error creando tabla GastosPedido:", err.message);
+            else console.log("Tabla GastosPedido verificada/creada.");
+        });
+
+        // --- Tabla: StockMateriasPrimas ---
+        // (Asegúrate de que esta definición coincida exactamente con lo que necesitas y tu versión anterior)
+        // He mantenido la Foreign Key comentada como en tu database.py original.
+        // Si la quieres habilitar, descoméntala y asegúrate que PRAGMA foreign_keys = ON; se ejecute al conectar a la DB.
+        db.run(`CREATE TABLE IF NOT EXISTS StockMateriasPrimas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pedido_id INTEGER,
+            material_tipo TEXT NOT NULL CHECK(material_tipo IN ('GOMA', 'PVC', 'FIELTRO', 'MAQUINARIA')), /* MAQUINARIA añadido por si acaso */
+            subtipo_material TEXT,
+            referencia_stock TEXT UNIQUE,
+            fecha_entrada_almacen TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO')),
+            espesor TEXT,
+            ancho REAL,
+            largo_inicial REAL,
+            largo_actual REAL,
+            unidad_medida TEXT NOT NULL DEFAULT 'm',
+            coste_unitario_final REAL, 
+            color TEXT,
+            ubicacion TEXT,
+            notas TEXT,
+            origen_factura TEXT 
+            /* FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL */
+        )`, (err) => {
+            if (err) console.error("Error creando tabla StockMateriasPrimas:", err.message);
+            else console.log("Tabla StockMateriasPrimas verificada/creada.");
+        });
+
+        // --- Tabla: StockComponentes ---
+        db.run(`CREATE TABLE IF NOT EXISTS StockComponentes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            componente_ref TEXT NOT NULL UNIQUE,
+            descripcion TEXT,
+            pedido_id INTEGER,
+            cantidad_inicial REAL NOT NULL,
+            cantidad_actual REAL NOT NULL,
+            unidad_medida TEXT NOT NULL DEFAULT 'ud',
+            coste_unitario_final REAL NOT NULL,
+            fecha_entrada_almacen TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'RESERVADO', 'DESCATALOGADO')),
+            ubicacion TEXT,
+            notas TEXT,
+            origen_factura TEXT
+            /* FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL */
+        )`, (err) => {
+            if (err) console.error("Error creando tabla StockComponentes:", err.message);
+            else console.log("Tabla StockComponentes verificada/creada.");
+        });
+
+        // --- Tabla Configuracion ---
+        db.run(`CREATE TABLE IF NOT EXISTS Configuracion (
+            clave TEXT PRIMARY KEY,
+            valor TEXT
+        )`, (err) => {
+            if (err) console.error("Error creando tabla Configuracion:", err.message);
+            else console.log("Tabla Configuracion verificada/creada.");
+        });
+
+        // Crear índices (opcional pero recomendado para rendimiento en tablas grandes)
+        // No los incluyo todos aquí para brevedad, pero puedes añadirlos si lo deseas
+        // Ejemplo: db.run("CREATE INDEX IF NOT EXISTS idx_pp_numero_factura ON PedidosProveedores (numero_factura);");
+        
+        console.log("Verificación/Creación de todas las tablas esenciales completada.");
     });
 }
 
-// Llamar a la función para asegurar que las tablas existen al iniciar
-crearTablasSiNoExisten();
+
 
 
 // --- Rutas de la API ---
@@ -68,12 +161,28 @@ app.get('/api/estado', (req, res) => {
     res.json({ estado: 'Servidor Backend Node.js funcionando correctamente!' });
 });
 
-// Aquí añadiremos más rutas (endpoints) para interactuar con la base de datos
-// y la lógica de negocio.
+
+// --- NUEVO ENDPOINT PARA OBTENER EL STOCK ---
+app.get('/api/stock', async (req, res) => { // <--- Marcamos la función como async
+    console.log('Node.js: Se ha solicitado GET /api/stock');
+    try {
+        // Por ahora, no pasamos filtros desde req.query, pero podríamos hacerlo más adelante
+        // const filtros = req.query; // Ejemplo: /api/stock?material_tipo=GOMA
+        const stockItems = await consultarStockMateriasPrimas(null); // Usamos await porque devuelve una Promesa
+        
+        console.log(`Node.js: Devolviendo ${stockItems.length} items de stock.`);
+        res.json(stockItems); // Enviamos el array de items de stock como JSON
+    } catch (error) {
+        console.error("Error en el endpoint /api/stock:", error.message);
+        res.status(500).json({ error: "Error interno del servidor al obtener el stock.", detalle: error.message });
+    }
+});
+
 
 app.listen(PORT, () => {
     console.log(`Servidor Node.js API escuchando en http://localhost:${PORT}`);
 });
+
 
 // Cerrar la conexión a la base de datos cuando la aplicación se cierra
 process.on('SIGINT', () => {
