@@ -6,10 +6,47 @@ const sqlite3 = require('sqlite3').verbose(); // verbose() para más detalles en
 //Importaciones
 
 // --- Importar funciones de db_operations.js ---
-const { consultarStockMateriasPrimas } = require('./db_operations.js'); 
+const { consultarStockMateriasPrimas, consultarItemStockPorId } = require('./db_operations.js'); 
+
 
 const app = express();
 const PORT = process.env.PORT || 5002; // Usamos 5002 para evitar conflictos
+
+
+// --- NUEVO ENDPOINT PARA OBTENER DETALLES DE UN ÍTEM DE STOCK ESPECÍFICO ---
+app.get('/api/stock-item/:tabla/:id', async (req, res) => {
+    const tablaItem = req.params.tabla;
+    const idItem = parseInt(req.params.id, 10); // Convertir el ID a número entero
+
+    console.log(`Node.js: Se ha solicitado GET /api/stock-item/${tablaItem}/${idItem}`);
+
+    // Validación básica de los parámetros
+    if (!['StockMateriasPrimas', 'StockComponentes'].includes(tablaItem)) {
+        return res.status(400).json({ error: "Nombre de tabla no válido." });
+    }
+    if (isNaN(idItem) || idItem <= 0) {
+        return res.status(400).json({ error: "ID de ítem no válido." });
+    }
+
+    try {
+        const item = await consultarItemStockPorId(idItem, tablaItem);
+        
+        if (item) {
+            console.log(`Node.js: Devolviendo detalles para ${tablaItem} ID ${idItem}.`);
+            res.json(item);
+        } else {
+            console.log(`Node.js: No se encontró ${tablaItem} con ID ${idItem}.`);
+            res.status(404).json({ error: `No se encontró ${tablaItem} con ID ${idItem}.` });
+        }
+    } catch (error) {
+        console.error(`Error en el endpoint /api/stock-item/${tablaItem}/${idItem}:`, error.message);
+        // Revisar si el error ya fue por 'Tabla no válida' desde db_operations
+        if (error.message && error.message.startsWith("Tabla no válida")) {
+             return res.status(400).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor al obtener el ítem de stock.", detalle: error.message });
+    }
+});
 
 // Middlewares
 app.use(cors());
@@ -157,26 +194,60 @@ function crearTablasSiNoExisten() {
 
 // --- Rutas de la API ---
 app.get('/api/estado', (req, res) => {
-    console.log('Node.js: Se ha solicitado /api/estado');
+    console.log('Node.js: Se ha solicitado GET /api/estado');
     res.json({ estado: 'Servidor Backend Node.js funcionando correctamente!' });
 });
 
 
-// --- NUEVO ENDPOINT PARA OBTENER EL STOCK ---
-app.get('/api/stock', async (req, res) => { // <--- Marcamos la función como async
+
+app.get('/api/stock', async (req, res) => {
     console.log('Node.js: Se ha solicitado GET /api/stock');
     try {
-        // Por ahora, no pasamos filtros desde req.query, pero podríamos hacerlo más adelante
-        // const filtros = req.query; // Ejemplo: /api/stock?material_tipo=GOMA
-        const stockItems = await consultarStockMateriasPrimas(null); // Usamos await porque devuelve una Promesa
-        
-        console.log(`Node.js: Devolviendo ${stockItems.length} items de stock.`);
-        res.json(stockItems); // Enviamos el array de items de stock como JSON
+        const filtros = req.query; 
+        console.log('Node.js: Filtros recibidos en /api/stock:', filtros);
+        const stockItems = await consultarStockMateriasPrimas(filtros);
+        console.log(`Node.js: Devolviendo ${stockItems.length} items de stock (con filtros aplicados).`);
+        res.json(stockItems);
     } catch (error) {
         console.error("Error en el endpoint /api/stock:", error.message);
         res.status(500).json({ error: "Error interno del servidor al obtener el stock.", detalle: error.message });
     }
 });
+
+// --- NUEVO ENDPOINT PARA OBTENER DETALLES DE UN ÍTEM DE STOCK ESPECÍFICO ---
+app.get('/api/stock-item/:tabla/:id', async (req, res) => {
+    const tablaItem = req.params.tabla;
+    const idItem = parseInt(req.params.id, 10);
+
+    console.log(`Node.js: Se ha solicitado GET /api/stock-item/${tablaItem}/${idItem}`);
+
+    if (!['StockMateriasPrimas', 'StockComponentes'].includes(tablaItem)) {
+        return res.status(400).json({ error: "Nombre de tabla no válido." });
+    }
+    if (isNaN(idItem) || idItem <= 0) {
+        return res.status(400).json({ error: "ID de ítem no válido." });
+    }
+
+    try {
+        const item = await consultarItemStockPorId(idItem, tablaItem);
+        
+        if (item) {
+            console.log(`Node.js: Devolviendo detalles para ${tablaItem} ID ${idItem}.`);
+            res.json(item);
+        } else {
+            console.log(`Node.js: No se encontró ${tablaItem} con ID ${idItem}.`);
+            res.status(404).json({ error: `No se encontró ${tablaItem} con ID ${idItem}.` });
+        }
+    } catch (error) {
+        console.error(`Error en el endpoint /api/stock-item/${tablaItem}/${idItem}:`, error.message);
+        if (error.message && error.message.startsWith("Tabla no válida")) {
+             return res.status(400).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor al obtener el ítem de stock.", detalle: error.message });
+    }
+});
+
+
 
 
 app.listen(PORT, () => {
