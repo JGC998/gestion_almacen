@@ -235,12 +235,7 @@ p {
   gap: 10px; /* Espacio entre botones */
 }
 
-/* Los botones de app-nav ahora usan los estilos por defecto de button de index.css 
-   pero podemos sobreescribir si es necesario o especializar el :disabled */
-.app-nav button {
-  /* Hereda mucho de button en index.css */
-  /* Si necesitas un estilo específico para estos botones de navegación */
-}
+
 
 .app-nav button:disabled {
   background-color: var(--color-verde-primario);
