@@ -35,7 +35,7 @@
 
 ## Fase 1: Funcionalidad Básica de Stock (Lectura Avanzada y Escritura)
 
-### 1.3. Frontend (React) - Filtros Básicos para el Stock (PENDIENTE)
+### 1.3. Frontend (React) - Filtros Básicos para el Stock (COMPLETADA)
     * **Tarea:** Añadir controles de filtro básicos a la vista de stock en React.
     * **Detalles:**
         * Desplegables para filtrar por `Material` y `Estado`.
@@ -45,7 +45,7 @@
         * Modificar el endpoint `/api/stock` y la función `consultarStockMateriasPrimas` en `db_operations.js` para que acepten y procesen estos parámetros de filtro en la consulta SQL.
     * **Entrega:** Vista de stock con capacidad de filtrado funcional.
 
-### 1.4. Backend y Frontend - Visualización Detallada de Item de Stock (PENDIENTE)
+### 1.4. Backend y Frontend - Visualización Detallada de Item de Stock (COMPLETADA)
     * **Tarea:** Permitir al usuario ver todos los detalles de un ítem de stock específico.
     * **Backend (Node.js API):**
         * Crear un endpoint (ej: `GET /api/stock/{id_item}`) que devuelva todos los datos de un ítem de stock por su ID.

@@ -109,7 +109,125 @@ function consultarItemStockPorId(idItem, tablaItem) {
     });
 }
 
+// backend-node/db_operations.js
+
+// ... (código existente: conectarDB, consultarStockMateriasPrimas, consultarItemStockPorId) ...
+// ... (código existente: insertarPedidoProveedor, insertarGastoPedido, insertarStockMateriaPrima) ...
+// Asegúrate de que las funciones insertarPedidoProveedor, insertarGastoPedido, 
+// y insertarStockMateriaPrima que te di antes estén aquí.
+// Haremos una pequeña modificación en insertarPedidoProveedor para manejar valor_conversion.
+
+/**
+ * Inserta un nuevo pedido en PedidosProveedores.
+ * @param {sqlite3.Database} db - La instancia de la base de datos.
+ * @param {object} pedidoData - Datos del pedido { numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion? }
+ * @returns {Promise<number>} ID del pedido insertado.
+ */
+function insertarPedidoProveedor(db, pedidoData) { // Modificada para incluir valor_conversion
+    return new Promise((resolve, reject) => {
+        const sql = `INSERT INTO PedidosProveedores (
+                        numero_factura, proveedor, fecha_pedido, fecha_llegada, 
+                        origen_tipo, observaciones, valor_conversion
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+        const params = [
+            pedidoData.numero_factura,
+            pedidoData.proveedor,
+            pedidoData.fecha_pedido,
+            pedidoData.fecha_llegada,
+            pedidoData.origen_tipo,
+            pedidoData.observaciones,
+            pedidoData.valor_conversion // Puede ser null para pedidos nacionales
+        ];
+        db.run(sql, params, function(err) {
+            if (err) {
+                console.error("Error al insertar en PedidosProveedores:", err.message);
+                // Revisar si es por factura duplicada
+                if (err.message.includes("UNIQUE constraint failed: PedidosProveedores.numero_factura")) {
+                    return reject(new Error(`El número de factura '${pedidoData.numero_factura}' ya existe.`));
+                }
+                return reject(err);
+            }
+            resolve(this.lastID);
+        });
+    });
+}
+
+/**
+ * Procesa y crea un nuevo pedido (Nacional o Importación), incluyendo su cabecera, gastos y líneas de stock.
+ * Utiliza una transacción para asegurar la atomicidad de las operaciones.
+ * @param {object} datosCompletosPedido - Objeto con { pedido, lineas, gastos, material_tipo_general }
+ * - pedido: { numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion? }
+ * - lineas: Array de objetos de línea, cada uno debe tener 'coste_unitario_final_calculado' y otros campos para StockMateriasPrimas.
+ * - gastos: Array de objetos de gasto.
+ * - material_tipo_general: 'GOMA', 'PVC', 'FIELTRO' (usado para StockMateriasPrimas.material_tipo)
+ * @returns {Promise<object>} Objeto con el ID del pedido creado y un mensaje.
+ */
+async function procesarNuevoPedido(datosCompletosPedido) {
+    const { pedido, lineas, gastos, material_tipo_general } = datosCompletosPedido;
+    const db = conectarDB();
+
+    try {
+        await new Promise((resolve, reject) => {
+            db.run('BEGIN TRANSACTION;', (err) => err ? reject(err) : resolve());
+        });
+
+        // Insertar cabecera del pedido
+        const pedidoId = await insertarPedidoProveedor(db, pedido);
+
+        // Insertar gastos
+        for (const gasto of gastos) {
+            const gastoDataParaDB = {
+                ...gasto, // tipo_gasto, descripcion, coste_eur
+                pedido_id: pedidoId,
+            };
+            await insertarGastoPedido(db, gastoDataParaDB);
+        }
+
+        // Insertar líneas de stock
+        for (const linea of lineas) {
+            const stockDataParaDB = {
+                pedido_id: pedidoId,
+                material_tipo: material_tipo_general, // GOMA, PVC, FIELTRO
+                subtipo_material: linea.subtipo_material,
+                referencia_stock: linea.referencia_stock,
+                fecha_entrada_almacen: pedido.fecha_llegada,
+                status: 'DISPONIBLE',
+                espesor: linea.espesor,
+                ancho: linea.ancho,
+                largo_inicial: linea.cantidad_original, // Asumimos que cantidad_original es el largo para estos materiales
+                largo_actual: linea.cantidad_original,
+                unidad_medida: linea.unidad_medida || 'm', // 'm' por defecto, pero puede venir de la línea
+                coste_unitario_final: linea.coste_unitario_final_calculado,
+                color: linea.color,
+                ubicacion: linea.ubicacion,
+                notas: linea.notas_linea,
+                origen_factura: pedido.numero_factura
+            };
+            await insertarStockMateriaPrima(db, stockDataParaDB);
+        }
+
+        await new Promise((resolve, reject) => {
+            db.run('COMMIT;', (err) => err ? reject(err) : resolve());
+        });
+
+        return { pedidoId, mensaje: `Pedido de ${material_tipo_general} (${pedido.origen_tipo}) creado exitosamente.` };
+
+    } catch (error) {
+        console.error(`Error en la transacción de procesarNuevoPedido (${material_tipo_general}, ${pedido.origen_tipo}), revirtiendo:`, error.message);
+        await new Promise((resolve, reject) => {
+            db.run('ROLLBACK;', (err) => err ? reject(err) : resolve());
+        });
+        throw error; 
+    } finally {
+        db.close((closeErr) => {
+            if (closeErr) console.error("Error cerrando la DB después de transacción en procesarNuevoPedido:", closeErr.message);
+        });
+    }
+}
+
 module.exports = {
     consultarStockMateriasPrimas,
-    consultarItemStockPorId
+    consultarItemStockPorId,
+    procesarNuevoPedido // Reemplaza crearNuevoPedidoNacionalGoma
 };
+

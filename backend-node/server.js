@@ -6,11 +6,19 @@ const sqlite3 = require('sqlite3').verbose(); // verbose() para más detalles en
 //Importaciones
 
 // --- Importar funciones de db_operations.js ---
-const { consultarStockMateriasPrimas, consultarItemStockPorId } = require('./db_operations.js'); 
+const { consultarStockMateriasPrimas, 
+        consultarItemStockPorId, 
+        procesarNuevoPedido 
+    } = require('./db_operations.js'); 
 
 
 const app = express();
 const PORT = process.env.PORT || 5002; // Usamos 5002 para evitar conflictos
+
+
+// Middlewares
+app.use(cors());    
+app.use(express.json());
 
 
 // --- NUEVO ENDPOINT PARA OBTENER DETALLES DE UN ÍTEM DE STOCK ESPECÍFICO ---
@@ -48,9 +56,6 @@ app.get('/api/stock-item/:tabla/:id', async (req, res) => {
     }
 });
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
 
 // --- Configuración de la Base de Datos SQLite ---
 // Definimos la ruta a la base de datos. Asumimos que estará en backend-node/almacen/almacen.db
@@ -248,6 +253,149 @@ app.get('/api/stock-item/:tabla/:id', async (req, res) => {
 });
 
 
+// --- LÓGICA DE CÁLCULO DE COSTES AUXILIAR ---
+function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
+    let costeTotalPedidoSinGastosEnMonedaOriginal = 0;
+    
+    const lineasConPrecioBase = lineasItems.map(linea => {
+        const cantidad = parseFloat(linea.cantidad_original) || 0;
+        const precioUnitarioOriginal = parseFloat(linea.precio_unitario_original) || 0;
+        
+        // Convertir a EUR si hay valor de conversión y la moneda no es EUR explícitamente
+        // (Si es nacional, valorConversion será 1 y moneda_original debería ser EUR)
+        // Si moneda_original es, por ejemplo, USD, y valorConversion es la tasa USD->EUR.
+        let precioUnitarioEur = precioUnitarioOriginal;
+        if (linea.moneda_original && linea.moneda_original.toUpperCase() !== 'EUR' && valorConversion !== 1) {
+            precioUnitarioEur = precioUnitarioOriginal * valorConversion;
+        } else if (valorConversion !== 1 && (!linea.moneda_original || linea.moneda_original.toUpperCase() === 'EUR')) {
+            // Si hay valor de conversión pero la moneda es EUR o no se especifica, asumimos que el precio ya está en EUR y no aplicamos conversión.
+            // O podrías lanzar un error si esto es una inconsistencia.
+            // Para simplificar, si es EUR, no se convierte. Si no hay moneda, y hay VC, se asume que es foreign.
+             // Si no se define moneda_original pero hay valor de conversión, asumimos que el precio está en la moneda extranjera
+            if (!linea.moneda_original) {
+                 precioUnitarioEur = precioUnitarioOriginal * valorConversion;
+            }
+        }
+
+
+        const precioTotalBaseLineaEur = cantidad * precioUnitarioEur;
+        costeTotalPedidoSinGastosEnMonedaOriginal += precioTotalBaseLineaEur; // Acumulamos en EUR
+        return { ...linea, precio_total_euro_base: precioTotalBaseLineaEur, precio_unitario_eur: precioUnitarioEur };
+    });
+
+    let totalGastosPedidoEur = 0;
+    gastosItems.forEach(gasto => {
+        // Asumimos que gasto.coste_eur ya está en EUR.
+        totalGastosPedidoEur += (parseFloat(gasto.coste_eur) || 0);
+    });
+
+    const porcentajeGastos = costeTotalPedidoSinGastosEnMonedaOriginal > 0 
+        ? totalGastosPedidoEur / costeTotalPedidoSinGastosEnMonedaOriginal
+        : 0;
+
+    return lineasConPrecioBase.map(linea => {
+        const gastosAsignadosLinea = linea.precio_total_euro_base * porcentajeGastos;
+        const precioTotalConGastosLinea = linea.precio_total_euro_base + gastosAsignadosLinea;
+        const costeUnitarioFinalCalculado = linea.cantidad_original > 0
+            ? precioTotalConGastosLinea / linea.cantidad_original
+            : 0;
+        return { ...linea, coste_unitario_final_calculado: costeUnitarioFinalCalculado };
+    });
+}
+
+
+// --- ENDPOINT PARA NUEVOS PEDIDOS NACIONALES (GOMA, PVC, FIELTRO) ---
+app.post('/api/pedidos-nacionales', async (req, res) => {
+    const { pedido, lineas, gastos, material_tipo } = req.body; // material_tipo: GOMA, PVC, FIELTRO
+
+    console.log(`Node.js: POST /api/pedidos-nacionales, Material: ${material_tipo}`);
+
+    if (!pedido || !lineas || !gastos || !material_tipo) {
+        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos' y 'material_tipo'." });
+    }
+    if (!['GOMA', 'PVC', 'FIELTRO'].includes(material_tipo.toUpperCase())) {
+        return res.status(400).json({ error: "Valor de 'material_tipo' no válido." });
+    }
+    if (!Array.isArray(lineas) || lineas.length === 0) {
+        return res.status(400).json({ error: "Debe haber al menos una línea de pedido." });
+    }
+    // Aquí más validaciones específicas...
+
+    try {
+        const lineasConCostes = calcularCostesLinea(lineas, gastos); // Para nacional, valorConversion es 1 (implícito)
+
+        const datosParaDB = {
+            pedido: { ...pedido, origen_tipo: 'NACIONAL' },
+            lineas: lineasConCostes,
+            gastos: gastos,
+            material_tipo_general: material_tipo.toUpperCase()
+        };
+
+        const resultado = await procesarNuevoPedido(datosParaDB);
+        
+        console.log(`Node.js: Pedido NACIONAL de ${material_tipo} creado con ID: ${resultado.pedidoId}`);
+        res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
+
+    } catch (error) {
+        console.error(`Error en POST /api/pedidos-nacionales (${material_tipo}):`, error.message);
+        if (error.message.includes("ya existe")) {
+             return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor al crear el pedido nacional.", detalle: error.message });
+    }
+});
+
+// --- ENDPOINT PARA NUEVOS PEDIDOS DE IMPORTACIÓN (CONTENEDORES) ---
+app.post('/api/pedidos-importacion', async (req, res) => {
+    const { pedido, lineas, gastos, material_tipo, valor_conversion } = req.body;
+
+    console.log(`Node.js: POST /api/pedidos-importacion, Material: ${material_tipo}, Conv: ${valor_conversion}`);
+
+    if (!pedido || !lineas || !gastos || !material_tipo || valor_conversion === undefined) {
+        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos', 'material_tipo' y 'valor_conversion'." });
+    }
+    if (!['GOMA', 'PVC', 'FIELTRO'].includes(material_tipo.toUpperCase())) {
+        return res.status(400).json({ error: "Valor de 'material_tipo' no válido." });
+    }
+    const vc = parseFloat(valor_conversion);
+    if (isNaN(vc) || vc <= 0) {
+        return res.status(400).json({ error: "El 'valor_conversion' debe ser un número positivo." });
+    }
+    if (!Array.isArray(lineas) || lineas.length === 0) {
+        return res.status(400).json({ error: "Debe haber al menos una línea de pedido." });
+    }
+    // Validar estructura de gastos de importación (SUPLIDOS, EXENTO, SUJETO)
+    const tiposGastoImportacionValidos = ['SUPLIDOS', 'EXENTO', 'SUJETO'];
+    if (gastos.some(g => !tiposGastoImportacionValidos.includes(g.tipo_gasto?.toUpperCase()))) {
+        return res.status(400).json({ error: `Tipos de gasto para importación deben ser ${tiposGastoImportacionValidos.join(', ')}`});
+    }
+    // Aquí más validaciones...
+
+    try {
+        // La moneda_original de las líneas puede ser USD, y valor_conversion es la tasa USD a EUR.
+        // calcularCostesLinea se encargará de la conversión si moneda_original no es EUR.
+        const lineasConCostes = calcularCostesLinea(lineas, gastos, vc);
+
+        const datosParaDB = {
+            pedido: { ...pedido, origen_tipo: 'CONTENEDOR', valor_conversion: vc },
+            lineas: lineasConCostes,
+            gastos: gastos.map(g => ({...g, tipo_gasto: g.tipo_gasto.toUpperCase()})), // Asegurar mayúsculas
+            material_tipo_general: material_tipo.toUpperCase()
+        };
+        
+        const resultado = await procesarNuevoPedido(datosParaDB);
+        
+        console.log(`Node.js: Pedido de IMPORTACIÓN de ${material_tipo} creado con ID: ${resultado.pedidoId}`);
+        res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
+
+    } catch (error) {
+        console.error(`Error en POST /api/pedidos-importacion (${material_tipo}):`, error.message);
+        if (error.message.includes("ya existe")) {
+             return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor al crear el pedido de importación.", detalle: error.message });
+    }
+});
 
 
 app.listen(PORT, () => {
