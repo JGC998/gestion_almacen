@@ -547,12 +547,58 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
     }
 }
 
+// backend-node/db_operations.js
+
+// ... (tu código existente: conectarDB, consultarStockMateriasPrimas, etc.) ...
+
+/**
+ * Actualiza el estado de un ítem de stock específico.
+ * @param {number} stockItemId - El ID del ítem de stock a actualizar.
+ * @param {string} nuevoEstado - El nuevo estado ('EMPEZADA', 'AGOTADO', etc.).
+ * @returns {Promise<number>} Promesa que resuelve al número de filas actualizadas (debería ser 1).
+ */
+function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
+    return new Promise((resolve, reject) => {
+        const db = conectarDB();
+        // Validar que el nuevoEstado sea uno de los permitidos por la tabla
+        const estadosPermitidos = ['DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO'];
+        if (!estadosPermitidos.includes(nuevoEstado.toUpperCase())) {
+            db.close(); // Cerrar la conexión antes de rechazar
+            return reject(new Error(`Estado '${nuevoEstado}' no válido.`));
+        }
+
+        const sql = `UPDATE StockMateriasPrimas SET status = ? WHERE id = ?`;
+        const params = [nuevoEstado.toUpperCase(), stockItemId];
+
+        console.log(`SQL (actualizarEstadoStockItem): ${sql}, Params: ${JSON.stringify(params)}`);
+
+        db.run(sql, params, function(err) { // 'this' se usa para changes, por eso no es arrow function
+            db.close((closeErr) => {
+                if (closeErr) {
+                    console.error("Error cerrando la DB después de actualizar estado de stock:", closeErr.message);
+                }
+            });
+            if (err) {
+                console.error(`Error al actualizar estado del ítem de stock ${stockItemId}:`, err.message);
+                return reject(err);
+            }
+            if (this.changes === 0) {
+                return reject(new Error(`No se encontró el ítem de stock con ID ${stockItemId} para actualizar.`));
+            }
+            resolve(this.changes); // Número de filas actualizadas
+        });
+    });
+}
+
+
+
 
 module.exports = {
     consultarStockMateriasPrimas,
     consultarItemStockPorId,
     procesarNuevoPedido,
     consultarListaPedidos,
-    obtenerDetallesCompletosPedido
+    obtenerDetallesCompletosPedido,
+    actualizarEstadoStockItem
 };
 

@@ -10,7 +10,8 @@ const { consultarStockMateriasPrimas,
         consultarItemStockPorId, 
         procesarNuevoPedido,
         consultarListaPedidos,
-        obtenerDetallesCompletosPedido
+        obtenerDetallesCompletosPedido,
+        actualizarEstadoStockItem
     } = require('./db_operations.js'); 
 
 
@@ -441,6 +442,47 @@ app.post('/api/pedidos-importacion', async (req, res) => {
              return res.status(409).json({ error: error.message });
         }
         res.status(500).json({ error: "Error interno del servidor al crear el pedido de importación.", detalle: error.message });
+    }
+});
+
+app.patch('/api/stock-items/:stockItemId/estado', async (req, res) => {
+    const stockItemId = parseInt(req.params.stockItemId, 10);
+    const { status: nuevoEstado } = req.body; // Esperamos { "status": "NUEVO_ESTADO" }
+
+    console.log(`Node.js: Se ha solicitado PATCH /api/stock-items/${stockItemId}/estado con nuevo estado: ${nuevoEstado}`);
+
+    if (isNaN(stockItemId) || stockItemId <= 0) {
+        return res.status(400).json({ error: "ID de ítem de stock no válido." });
+    }
+    if (!nuevoEstado || typeof nuevoEstado !== 'string') {
+        return res.status(400).json({ error: "Nuevo estado no proporcionado o en formato incorrecto. Se espera { \"status\": \"NUEVO_ESTADO\" }." });
+    }
+
+    // Podrías añadir validación aquí para los estados específicos que permite esta acción
+    // por ejemplo, si solo se puede pasar a EMPEZADA o AGOTADO desde aquí.
+    // La función de db_operations ya valida contra todos los estados permitidos en la DB.
+
+    try {
+        const cambios = await actualizarEstadoStockItem(stockItemId, nuevoEstado);
+        
+        if (cambios > 0) {
+            console.log(`Node.js: Estado del ítem de stock ID ${stockItemId} actualizado a ${nuevoEstado}.`);
+            res.json({ mensaje: `Estado del ítem de stock ID ${stockItemId} actualizado a ${nuevoEstado}.` });
+        } else {
+            // Esto no debería ocurrir si actualizarEstadoStockItem ya rechaza si no hay cambios.
+            // Pero es una doble verificación.
+            console.log(`Node.js: No se encontró o no se actualizó el ítem de stock ID ${stockItemId}.`);
+            res.status(404).json({ error: `No se encontró el ítem de stock con ID ${stockItemId} o no se pudo actualizar.` });
+        }
+    } catch (error) {
+        console.error(`Error en PATCH /api/stock-items/${stockItemId}/estado:`, error.message);
+        if (error.message.includes("No se encontró el ítem de stock")) {
+            return res.status(404).json({ error: error.message });
+        }
+        if (error.message.includes("Estado") && error.message.includes("no válido")) {
+            return res.status(400).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor al actualizar el estado del ítem de stock.", detalle: error.message });
     }
 });
 

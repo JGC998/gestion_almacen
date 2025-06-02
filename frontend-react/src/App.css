@@ -266,3 +266,41 @@ p {
    y ya no usas la tabla agrupada expandible, puedes eliminarlos para limpiar el CSS.
    Los he quitado de esta versión para que coincida con el App.jsx de lista plana.
 */
+
+/* frontend-react/src/App.css */
+/* ... (tus estilos existentes) ... */
+
+.action-button {
+  padding: 4px 8px;
+  font-size: 0.8em;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 5px; /* Espacio entre botones si hay más de uno */
+  min-width: 70px; /* Ancho mínimo para consistencia */
+  text-align: center;
+}
+
+.action-button.empezada {
+  background-color: #f0ad4e; /* Naranja para "Empezada" */
+}
+.action-button.empezada:hover {
+  background-color: #ec971f;
+}
+
+.action-button.agotada {
+  background-color: #d9534f; /* Rojo para "Agotada" */
+}
+.action-button.agotada:hover {
+  background-color: #c9302c;
+}
+
+/* Ajustes en la tabla de stock para dar espacio a los nuevos botones */
+/* Puedes ajustar las cabeceras si algunas columnas se ven muy apretadas */
+/* Ejemplo: Reducir el padding un poco más en las celdas de la tabla de stock */
+/*
+table th, table td {
+  padding: 8px 10px; 
+}
+*/

@@ -1,6 +1,6 @@
 // frontend-react/src/components/ListaPedidos.jsx
 import { useState, useEffect, useCallback } from 'react';
-import DetallePedidoModal from './components//DetallePedidoModal'; // Asegúrate que la ruta sea correcta
+import DetallePedidoModal from './components/DetallePedidoModal'; // Asegúrate que la ruta sea correcta
 // Asumiremos que DetallePedidoModal.jsx existirá en la misma carpeta o donde corresponda
 // Lo crearemos en el siguiente paso. Por ahora, preparamos su llamada.
 // import DetallePedidoModal from './DetallePedidoModal'; 

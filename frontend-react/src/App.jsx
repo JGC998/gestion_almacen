@@ -3,10 +3,12 @@ import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import FormularioPedidoNacional from './components/FormularioPedidoNacional.jsx';
 import FormularioPedidoImportacion from './components/FormularioPedidoImportacion.jsx';
-import ListaPedidos from './ListaPedidos.jsx';
+import ListaPedidos from './ListaPedidos.jsx'; 
 
-// --- Componente Modal Simple para Detalles del Stock (sin cambios respecto a la versión anterior) ---
+
+// --- Componente Modal Simple para Detalles del Stock (Bobina) ---
 function DetalleStockModal({ item, onClose, isLoading, error }) {
+  // ... (código del modal DetalleStockModal como lo tenías en la respuesta #38)
   if (!item && !isLoading && !error) return null;
   let fechaEntradaFormateada = 'N/A';
   if (item && item.fecha_entrada_almacen) {
@@ -56,8 +58,9 @@ function DetalleStockModal({ item, onClose, isLoading, error }) {
   );
 }
 
+
 function App() {
-  const [stockList, setStockList] = useState([]); // Lista plana de todas las bobinas para mostrar
+  const [stockList, setStockList] = useState([]);
   const [loadingStock, setLoadingStock] = useState(true);
   const [errorStock, setErrorStock] = useState(null);
 
@@ -67,62 +70,58 @@ function App() {
 
   const [itemSeleccionadoParaModal, setItemSeleccionadoParaModal] = useState(null);
   const [mostrarModalDetalles, setMostrarModalDetalles] = useState(false);
-  // isLoadingDetalles y errorDetalles se mantienen por si el modal los usa, aunque ahora no hacemos fetch para el modal
   const [loadingDetalles, setLoadingDetalles] = useState(false); 
   const [errorDetalles, setErrorDetalles] = useState(null);
+  
+  const [vistaActual, setVistaActual] = useState('STOCK');
+  // Para mensajes de feedback de la actualización de estado
+  const [updateStatusMessage, setUpdateStatusMessage] = useState('');
+  const [updateStatusError, setUpdateStatusError] = useState('');
+
 
   const opcionesMaterial = ["", "GOMA", "PVC", "FIELTRO", "MAQUINARIA", "COMPONENTE"];
   const opcionesEstado = ["", "DISPONIBLE", "EMPEZADA", "AGOTADO", "DESCATALOGADO"];
 
-  
-
   const fetchStockAndProcess = useCallback(async () => {
+    // ... (tu función fetchStockAndProcess de la respuesta #38, sin cambios en su lógica interna) ...
     setLoadingStock(true);
     setErrorStock(null);
-    const apiUrl = `http://localhost:5002/api/stock`; // Trae todas las bobinas
+    // Limpiar mensajes de actualización de estado al recargar el stock
+    setUpdateStatusMessage('');
+    setUpdateStatusError('');
+
+    const apiUrl = `http://localhost:5002/api/stock`;
     console.log("Llamando a la API (stock total para lista plana):", apiUrl);
     try {
       const response = await fetch(apiUrl);
       if (!response.ok) throw new Error(`Error del servidor: ${response.status} ${response.statusText}`);
-      let data = await response.json(); // data es la lista de todas las bobinas
+      let data = await response.json();
 
-      // 1. Filtrar
       data = data.filter(bobina => {
         let pasaFiltroMaterial = true;
         let pasaFiltroEstado = true;
         let pasaFiltroBusqueda = true;
-
-        if (filtroMaterial) {
-            pasaFiltroMaterial = bobina.material_tipo?.toUpperCase() === filtroMaterial.toUpperCase();
-        }
-        if (filtroEstado) {
-            pasaFiltroEstado = bobina.status?.toUpperCase() === filtroEstado.toUpperCase();
-        }
+        if (filtroMaterial) pasaFiltroMaterial = bobina.material_tipo?.toUpperCase() === filtroMaterial.toUpperCase();
+        if (filtroEstado) pasaFiltroEstado = bobina.status?.toUpperCase() === filtroEstado.toUpperCase();
         if (filtroBusqueda.trim() !== '') {
             const termino = filtroBusqueda.trim().toUpperCase();
             pasaFiltroBusqueda = bobina.referencia_stock?.toUpperCase().includes(termino) ||
                                  bobina.subtipo_material?.toUpperCase().includes(termino) ||
                                  bobina.origen_factura?.toUpperCase().includes(termino) ||
                                  bobina.espesor?.toUpperCase().includes(termino) ||
-                                 bobina.color?.toUpperCase().includes(termino) || // Añadido color a la búsqueda
-                                 bobina.ubicacion?.toUpperCase().includes(termino); // Añadida ubicación a la búsqueda
+                                 bobina.color?.toUpperCase().includes(termino) ||
+                                 bobina.ubicacion?.toUpperCase().includes(termino);
         }
         return pasaFiltroMaterial && pasaFiltroEstado && pasaFiltroBusqueda;
       });
-
-      // 2. Ordenar
       data.sort((a, b) => {
         const materialA = a.material_tipo || '';
         const materialB = b.material_tipo || '';
-        if (materialA.localeCompare(materialB) !== 0) {
-            return materialA.localeCompare(materialB);
-        }
-        // Opcional: sub-ordenación por referencia_stock si los materiales son iguales
+        if (materialA.localeCompare(materialB) !== 0) return materialA.localeCompare(materialB);
         const refA = a.referencia_stock || '';
         const refB = b.referencia_stock || '';
         return refA.localeCompare(refB);
       });
-
       setStockList(data);
     } catch (err) {
       console.error("Error al obtener y procesar el stock:", err);
@@ -131,12 +130,11 @@ function App() {
     } finally {
       setLoadingStock(false);
     }
-  }, [filtroMaterial, filtroEstado, filtroBusqueda]); // Depende de los filtros para re-ejecutar
+  }, [filtroMaterial, filtroEstado, filtroBusqueda]);
 
   useEffect(() => {
     fetchStockAndProcess();
   }, [fetchStockAndProcess]);
-
 
   const handleMaterialChange = (event) => setFiltroMaterial(event.target.value);
   const handleEstadoChange = (event) => setFiltroEstado(event.target.value);
@@ -152,7 +150,32 @@ function App() {
     setItemSeleccionadoParaModal(null);
   };
 
-  const [vistaActual, setVistaActual] = useState('STOCK'); 
+  // --- NUEVA FUNCIÓN para cambiar el estado del stock ---
+  const handleChangeStockStatus = async (stockItemId, nuevoEstado) => {
+    setUpdateStatusMessage(''); // Limpiar mensajes anteriores
+    setUpdateStatusError('');
+
+    console.log(`Intentando cambiar estado del item ${stockItemId} a ${nuevoEstado}`);
+    try {
+      const response = await fetch(`http://localhost:5002/api/stock-items/${stockItemId}/estado`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: nuevoEstado }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || data.detalle || `Error del servidor: ${response.status}`);
+      }
+      setUpdateStatusMessage(data.mensaje || `Estado del item ${stockItemId} actualizado con éxito.`);
+      fetchStockAndProcess(); // Recargar la lista de stock para ver el cambio
+    } catch (err) {
+      console.error(`Error al cambiar estado del item ${stockItemId}:`, err);
+      setUpdateStatusError(err.message);
+    }
+  };
+
 
   const renderVista = () => {
     switch (vistaActual) {
@@ -164,29 +187,28 @@ function App() {
         return <FormularioPedidoImportacion />;
       case 'STOCK':
       default:
-        if (loadingStock) {
-          return <p>Cargando stock...</p>;
-        }
-        if (errorStock) {
-          return <p className="error-backend">Error al cargar lista de stock: {errorStock}</p>;
-        }
-        if (stockList.length === 0) {
-          return <p>No hay bobinas de stock que coincidan con los filtros o no hay stock.</p>;
-        }
+        if (loadingStock) return <p>Cargando stock...</p>;
+        if (errorStock) return <p className="error-backend">Error al cargar lista de stock: {errorStock}</p>;
+        
         return (
           <>
             <h2>Stock Actual (Bobinas Individuales)</h2>
+            {/* Mensajes de feedback para la actualización de estado */}
+            {updateStatusMessage && <p className="success-message" style={{textAlign: 'center'}}>{updateStatusMessage}</p>}
+            {updateStatusError && <p className="error-backend" style={{textAlign: 'center'}}>{updateStatusError}</p>}
+
             <div className="filtros-container">
+              {/* ... (tus filtros existentes) ... */}
               <div className="filtro-item">
                 <label htmlFor="filtro-material">Material: </label>
                 <select id="filtro-material" value={filtroMaterial} onChange={handleMaterialChange}>
-                  {opcionesMaterial.map(opcion => ( <option key={opcion} value={opcion}>{opcion === "" ? "Todos" : opcion}</option> ))}
+                  {opcionesMaterial.map(opcion => ( <option key={opcion} value={opcion}>{opcion === "" ? "Todos" : opcion}</option>))}
                 </select>
               </div>
               <div className="filtro-item">
                 <label htmlFor="filtro-estado">Estado Bobina: </label>
                 <select id="filtro-estado" value={filtroEstado} onChange={handleEstadoChange}>
-                  {opcionesEstado.map(opcion => ( <option key={opcion} value={opcion}>{opcion === "" ? "Todos" : opcion}</option> ))}
+                  {opcionesEstado.map(opcion => ( <option key={opcion} value={opcion}>{opcion === "" ? "Todos" : opcion}</option>))}
                 </select>
               </div>
               <div className="filtro-item">
@@ -195,55 +217,74 @@ function App() {
               </div>
             </div>
             
-            <table>
-              <thead>
-                <tr>
-                  <th>ID Bobina</th>
-                  <th>Referencia Prod.</th>
-                  <th>Material</th>
-                  <th>Subtipo</th>
-                  <th>Espesor</th>
-                  <th>Ancho (mm)</th>
-                  <th>Largo Actual</th>
-                  <th>Coste Compra (€/ud)</th>
-                  <th>Estado Bobina</th>
-                  <th>Fecha Entrada</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stockList.map((bobina) => (
-                  <tr key={bobina.id}>
-                    <td>{bobina.id}</td>
-                    <td>{bobina.referencia_stock}</td>
-                    <td>{bobina.material_tipo}</td>
-                    <td>{bobina.subtipo_material || '-'}</td>
-                    <td>{bobina.espesor || '-'}</td>
-                    <td>{bobina.ancho !== null && bobina.ancho !== undefined ? parseFloat(bobina.ancho).toFixed(0) : '-'}</td>
-                    <td>{parseFloat(bobina.largo_actual || 0).toFixed(2)} {bobina.unidad_medida || 'm'}</td>
-                    <td>{bobina.coste_unitario_final !== null && bobina.coste_unitario_final !== undefined ? parseFloat(bobina.coste_unitario_final).toFixed(4) : 'N/A'}</td>
-                    <td>{bobina.status}</td>
-                    <td>{bobina.fecha_entrada_almacen ? new Date(bobina.fecha_entrada_almacen).toLocaleDateString('es-ES') : 'N/A'}</td>
-                    <td>
-                      <button 
-                        className="details-button"
-                        onClick={() => handleVerDetallesBobina(bobina)}
-                      >
-                        Ver Detalles
-                      </button>
-                    </td>
+            {stockList.length === 0 && <p>No hay bobinas de stock que coincidan con los filtros o no hay stock.</p>}
+            
+            {stockList.length > 0 && (
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Referencia Prod.</th>
+                    <th>Material</th>
+                    <th>Subtipo</th>
+                    <th>Largo Actual</th>
+                    <th>Estado Bobina</th>
+                    <th>Acciones Estado</th> {/* Nueva Columna */}
+                    <th>Ver Detalles</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {stockList.map((bobina) => (
+                    <tr key={bobina.id}>
+                      <td>{bobina.id}</td>
+                      <td>{bobina.referencia_stock}</td>
+                      <td>{bobina.material_tipo}</td>
+                      <td>{bobina.subtipo_material || '-'}</td>
+                      <td>{parseFloat(bobina.largo_actual || 0).toFixed(2)} {bobina.unidad_medida || 'm'}</td>
+                      <td>{bobina.status}</td>
+                      <td> {/* Acciones para cambiar estado */}
+                        {bobina.status === 'DISPONIBLE' && (
+                          <button 
+                            onClick={() => handleChangeStockStatus(bobina.id, 'EMPEZADA')}
+                            className="action-button empezada" 
+                            title="Marcar como Empezada"
+                          >
+                            Empezar
+                          </button>
+                        )}
+                        {bobina.status === 'EMPEZADA' && (
+                          <button 
+                            onClick={() => handleChangeStockStatus(bobina.id, 'AGOTADO')}
+                            className="action-button agotada"
+                            title="Marcar como Agotada"
+                          >
+                            Agotar
+                          </button>
+                        )}
+                        {/* Podrías añadir un botón para volver a 'DISPONIBLE' desde 'AGOTADO' si es necesario */}
+                        {/* {bobina.status === 'AGOTADO' && (
+                          <button onClick={() => handleChangeStockStatus(bobina.id, 'DISPONIBLE')}>Reactivar</button>
+                        )} */}
+                      </td>
+                      <td>
+                        <button 
+                          className="details-button"
+                          onClick={() => handleVerDetallesBobina(bobina)}
+                        >
+                          Detalles
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </>
         );
-    } // Fin del switch
-  }; // Fin de renderVista
+    }
+  };
 
-  // EL BLOQUE DUPLICADO QUE ESTABA AQUÍ DEBE SER ELIMINADO
-
-  return ( // Este es el único return principal del componente App
+  return (
     <div className="container">
       <h1>Gestión de Almacén</h1>
       <nav className="app-nav">
@@ -267,6 +308,6 @@ function App() {
       )}
     </div>
   );
-} // Fin del componente App
+}
 
 export default App;
