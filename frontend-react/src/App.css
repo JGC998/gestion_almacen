@@ -1,245 +1,43 @@
 /* frontend-react/src/App.css */
-/* ... (tus estilos existentes para .container, h1, table, .filtros-container, etc.) ... */
-/* Asegúrate de tenerlos o añádelos si borraste el archivo */
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
-    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  margin: 0;
-  background-color: #f4f7f9;
-  color: #333;
-}
+/* El estilo del body general ahora se controla principalmente desde index.css */
+/* Puedes quitar la regla 'body' de aquí si todo lo maneja index.css, 
+   o dejarla si necesitas especificidad para el contexto de App. */
 
 .container {
   padding: 20px 30px;
-  max-width: 1300px; /* Un poco más ancho para tablas grandes */
+  max-width: 1300px;
   margin: 20px auto;
-  background-color: #fff;
+  background-color: var(--color-fondo-principal); /* Usamos variable de index.css */
+  color: var(--color-texto-principal); /* Usamos variable de index.css */
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.08);
 }
 
-h1 {
+/* h1 dentro de App.jsx puede tener su estilo específico */
+.container h1 { /* Aplicado al h1 principal de la app */
   text-align: center;
-  color: #2c3e50;
+  color: var(--color-verde-oscuro); /* Título principal con verde oscuro */
   margin-bottom: 25px;
-  font-size: 1.8em;
+  font-size: 1.9em; /* Ligeramente más grande que el h2 */
+}
+
+.container h2 { /* Para subtítulos como "Stock Actual" */
+  color: var(--color-verde-primario);
+  margin-top: 30px;
+  margin-bottom: 15px;
+  border-bottom: 1px solid var(--color-verde-claro);
+  padding-bottom: 5px;
+  font-size: 1.5em;
 }
 
 .filtros-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 15px 20px; /* Espacio entre items de filtro */
+  gap: 15px 20px;
   margin-bottom: 25px;
-  padding: 20px;
-  background-color: #fdfdff; /* Un blanco muy ligero */
-  border: 1px solid #e0e6ed;
-  border-radius: 6px;
-}
-
-.filtro-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.filtro-item label {
-  font-weight: 600; /* Semibold */
-  font-size: 0.85em;
-  color: #555e68;
-}
-
-.filtro-item select,
-.filtro-item input[type="text"] {
-  padding: 9px 12px;
-  border-radius: 5px;
-  border: 1px solid #ced4da;
-  min-width: 180px;
-  font-size: 0.9em;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.filtro-item select:focus,
-.filtro-item input[type="text"]:focus {
-  border-color: #007bff;
-  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-  outline: none;
-}
-
-.filtro-item input[type="text"] {
-  min-width: 240px;
-}
-
-table {
-  width: 100%;
-  border-collapse: separate; /* Para permitir border-spacing y bordes redondeados */
-  border-spacing: 0;
-  margin-top: 20px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
-  border-radius: 8px; /* Bordes redondeados para la tabla */
-  overflow: hidden; /* Para que el border-radius afecte a las celdas */
-}
-
-th, td {
-  border-bottom: 1px solid #e0e6ed; /* Solo borde inferior para un look más limpio */
-  padding: 12px 15px;
-  text-align: left;
-  font-size: 0.9em;
-}
-
-th {
-  background-color: #007bff;
-  color: white;
-  font-weight: 600; /* Semibold */
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-size: 0.8em;
-}
-
-/* Quitar borde inferior de la última fila de celdas */
-tr:last-child td {
-  border-bottom: none;
-}
-
-tbody tr:nth-child(even) {
-  background-color: #f8f9fc;
-}
-
-tbody tr:hover {
-  background-color: #e9ecef;
-}
-
-.error-backend {
-  margin: 20px 0;
   padding: 15px;
-  border-radius: 5px;
-  background-color: #f8d7da;
-  border: 1px solid #f5c6cb;
-  color: #721c24;
-  text-align: center;
-}
-
-p {
-  line-height: 1.6;
-}
-
-/* Estilos para el Modal (copiados de la vez anterior, ajusta si es necesario) */
-.modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.6);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background-color: #fff;
-  padding: 25px 30px;
-  border-radius: 8px;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.25);
-  width: 90%;
-  max-width: 700px; 
-  max-height: 90vh; 
-  overflow-y: auto; 
-  position: relative;
-}
-
-.modal-content h2 {
-  margin-top: 0;
-  color: #007bff;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
-  margin-bottom: 20px;
-  font-size: 1.4em;
-}
-
-.modal-details-grid {
-  display: grid;
-  grid-template-columns: auto 1fr; 
-  gap: 8px 15px; 
-  font-size: 0.95em;
-}
-
-.modal-details-grid p {
-  margin: 0;
-  padding: 4px 0;
-}
-
-.modal-details-grid p strong {
-  color: #333;
-  margin-right: 8px;
-}
-
-.modal-close-button {
-  display: block;
-  margin: 25px auto 0;
-  padding: 10px 20px;
-  background-color: #6c757d;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 1em;
-}
-
-.modal-close-button:hover {
-  background-color: #5a6268;
-}
-
-.details-button {
-  padding: 6px 12px;
-  font-size: 0.85em;
-  background-color: #17a2b8;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.details-button:hover {
-  background-color: #117a8b;
-}
-
-/* ... (tus estilos existentes para .container, h1, table, .filtros-container, etc.) ... */
-/* Asegúrate de tenerlos o añádelos si borraste el archivo */
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
-    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  margin: 0;
-  background-color: #f4f7f9;
-  color: #333;
-}
-
-.container {
-  padding: 20px 30px;
-  max-width: 1300px; /* Un poco más ancho para tablas grandes */
-  margin: 20px auto;
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-}
-
-h1 {
-  text-align: center;
-  color: #2c3e50;
-  margin-bottom: 25px;
-  font-size: 1.8em;
-}
-
-.filtros-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 15px 20px; /* Espacio entre items de filtro */
-  margin-bottom: 25px;
-  padding: 20px;
-  background-color: #fdfdff; /* Un blanco muy ligero */
+  background-color: #f9f9f9; /* Un fondo claro para los filtros */
   border: 1px solid #e0e6ed;
   border-radius: 6px;
 }
@@ -251,16 +49,16 @@ h1 {
 }
 
 .filtro-item label {
-  font-weight: 600; /* Semibold */
-  font-size: 0.85em;
-  color: #555e68;
+  font-weight: 500; /* Un poco menos grueso que antes */
+  font-size: 0.9em;
+  color: #455a64; /* Un gris azulado oscuro para labels */
 }
 
 .filtro-item select,
 .filtro-item input[type="text"] {
   padding: 9px 12px;
-  border-radius: 5px;
-  border: 1px solid #ced4da;
+  border-radius: 4px; /* Bordes un poco menos redondeados */
+  border: 1px solid #B0BEC5; /* Un borde gris más suave */
   min-width: 180px;
   font-size: 0.9em;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -268,8 +66,8 @@ h1 {
 
 .filtro-item select:focus,
 .filtro-item input[type="text"]:focus {
-  border-color: #007bff;
-  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+  border-color: var(--color-verde-primario); /* Foco verde */
+  box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25); /* Sombra de foco verde, usando el color primario */
   outline: none;
 }
 
@@ -282,24 +80,24 @@ table {
   border-collapse: separate; 
   border-spacing: 0;
   margin-top: 20px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
-  border-radius: 8px; 
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Sombra más sutil */
+  border-radius: 6px; 
   overflow: hidden; 
 }
 
 th, td {
   border-bottom: 1px solid #e0e6ed; 
-  padding: 12px 15px;
+  padding: 10px 15px; /* Un poco menos de padding */
   text-align: left;
-  font-size: 0.9em;
+  font-size: 0.88em; /* Ligeramente más pequeño para más datos */
 }
 
 th {
-  background-color: #007bff;
-  color: white;
+  background-color: var(--color-verde-primario); /* Cabecera con verde primario */
+  color: var(--color-texto-sobre-verde); /* Texto blanco sobre verde */
   font-weight: 600; 
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.05em; /* Espaciado de letras sutil */
   font-size: 0.8em;
 }
 
@@ -308,101 +106,116 @@ tr:last-child td {
 }
 
 tbody tr:nth-child(even) {
-  background-color: #f8f9fc;
+  background-color: #f8f9fa; /* Un gris muy claro para filas pares */
 }
 
 tbody tr:hover {
-  background-color: #e9ecef;
+  background-color: var(--color-verde-claro); /* Hover con verde claro */
+  transition: background-color 0.15s ease-in-out; /* Añadido de index.css si no lo tenías aquí */
 }
 
-.error-backend {
+.error-backend, .success-message { /* Estilo común para mensajes */
   margin: 20px 0;
   padding: 15px;
-  border-radius: 5px;
-  background-color: #f8d7da;
-  border: 1px solid #f5c6cb;
-  color: #721c24;
+  border-radius: 4px;
   text-align: center;
+  border: 1px solid transparent;
 }
+
+.error-backend { 
+  background-color: #f8d7da;
+  border-color: #f5c6cb;
+  color: #721c24;
+}
+/* El .success-message se podría definir en el CSS del formulario si solo se usa allí,
+   o aquí si es general para App.css. Si lo tienes en el CSS del formulario, está bien. */
+.success-message { 
+  background-color: var(--color-verde-claro);
+  border-color: var(--color-verde-oscuro);
+  color: var(--color-verde-oscuro);
+}
+
 
 p {
   line-height: 1.6;
 }
 
-/* --- Estilos para el Modal --- */
+/* Estilos para el Modal */
 .modal-backdrop {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.6); /* Fondo semitransparente */
+  background-color: rgba(202, 192, 192, 0.5); /* Un poco menos oscuro */
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000; /* Para que esté por encima de otros elementos */
+  z-index: 1000;
 }
 
 .modal-content {
-  background-color: #fff;
-  padding: 25px 30px;
-  border-radius: 8px;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.25);
+  background-color: var(--color-fondo-principal);
+  color: var(--color-texto-principal);
+  padding: 20px 25px; /* Ajuste de padding */
+  border-radius: 6px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3); /* Sombra más pronunciada */
   width: 90%;
-  max-width: 700px; /* Ancho máximo del modal */
-  max-height: 90vh; /* Altura máxima del modal */
-  overflow-y: auto; /* Scroll si el contenido es muy largo */
-  position: relative; /* Para que el botón de cerrar se posicione relativo a esto */
+  max-width: 650px; 
+  max-height: 85vh; 
+  overflow-y: auto; 
+  position: relative;
 }
 
 .modal-content h2 {
   margin-top: 0;
-  color: #007bff; /* Un azul similar al de la cabecera de la tabla */
+  color: var(--color-verde-primario); /* Título del modal en verde */
   border-bottom: 1px solid #eee;
   padding-bottom: 10px;
   margin-bottom: 20px;
-  font-size: 1.4em;
+  font-size: 1.3em;
 }
 
 .modal-details-grid {
   display: grid;
-  grid-template-columns: auto 1fr; /* Columna para etiquetas, columna para valores */
-  gap: 8px 15px; /* Espacio entre filas y columnas */
-  font-size: 0.95em;
+  grid-template-columns: auto 1fr; 
+  gap: 7px 15px; 
+  font-size: 0.9em; /* Un poco más pequeño para más info */
 }
 
 .modal-details-grid p {
   margin: 0;
-  padding: 4px 0; /* Espacio vertical ligero */
+  padding: 3px 0; /* Menos padding vertical */
 }
 
 .modal-details-grid p strong {
-  color: #333;
-  margin-right: 8px; /* Espacio después de la etiqueta en negrita */
+  color: var(--color-texto-principal); /* Asegurar contraste */
+  margin-right: 8px;
 }
 
 .modal-close-button {
-  display: block; /* Para que ocupe su propia línea y se pueda centrar con margin auto */
+  display: block;
   margin: 25px auto 0;
   padding: 10px 20px;
-  background-color: #6c757d; /* Un gris neutro */
+  background-color: #6c757d; /* Botón de cerrar gris (o puedes usar un verde suave) */
   color: white;
   border: none;
-  border-radius: 5px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 1em;
+  font-size: 0.95em;
+  transition: background-color 0.2s ease-in-out;
 }
 
 .modal-close-button:hover {
   background-color: #5a6268;
 }
 
-/* --- Estilos para el Botón "Ver Detalles" en la Tabla --- */
+/* Botón "Ver Detalles" en la tabla */
 .details-button {
-  padding: 6px 12px;
-  font-size: 0.85em;
-  background-color: #17a2b8; /* Un color cian o azul claro */
-  color: white;
+  padding: 5px 10px; /* Un poco más pequeño */
+  font-size: 0.8em;
+  background-color: var(--color-verde-primario);
+  color: var(--color-texto-sobre-verde);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -410,39 +223,46 @@ p {
 }
 
 .details-button:hover {
-  background-color: #117a8b; /* Un poco más oscuro al pasar el ratón */
+  background-color: var(--color-verde-oscuro);
 }
 
-/* frontend-react/src/App.css */
-/* ... (tus estilos existentes) ... */
-
+/* Estilos para la navegación de App.jsx */
 .app-nav {
-  margin-bottom: 20px;
+  margin-bottom: 25px; /* Más margen inferior */
   padding-bottom: 15px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--color-verde-claro); /* Borde con verde claro */
   display: flex;
-  gap: 10px;
+  gap: 10px; /* Espacio entre botones */
 }
 
+/* Los botones de app-nav ahora usan los estilos por defecto de button de index.css 
+   pero podemos sobreescribir si es necesario o especializar el :disabled */
 .app-nav button {
-  padding: 8px 15px;
-  background-color: #f0f0f0;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.app-nav button:hover {
-  background-color: #e7e7e7;
+  /* Hereda mucho de button en index.css */
+  /* Si necesitas un estilo específico para estos botones de navegación */
 }
 
 .app-nav button:disabled {
-  background-color: #007bff;
-  color: white;
-  border-color: #007bff;
+  background-color: var(--color-verde-primario);
+  color: var(--color-texto-sobre-verde);
+  border-color: var(--color-verde-primario); /* Asegura que el borde también sea verde */
   cursor: default;
+  opacity: 0.85; /* Para que se vea ligeramente diferente al hover activo */
+}
+.app-nav button:hover:not(:disabled) { /* Reutilizando el estilo hover de index.css si es el mismo */
+   border-color: var(--color-boton-borde-hover); /* Heredado de index.css */
+   /* Si quieres un hover específico para la nav:
+   background-color: var(--color-verde-oscuro);
+   color: var(--color-texto-sobre-verde);
+   border-color: var(--color-verde-oscuro);
+   */
 }
 
 .vista-contenido {
   margin-top: 20px;
 }
+
+/* Si tenías estilos para .expand-button, .sub-table-row, .sub-table, .details-button-small 
+   y ya no usas la tabla agrupada expandible, puedes eliminarlos para limpiar el CSS.
+   Los he quitado de esta versión para que coincida con el App.jsx de lista plana.
+*/

@@ -1,11 +1,30 @@
+/* frontend-react/src/index.css */
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
+  /* Definimos nuestra paleta verde */
+  --color-verde-primario: #4CAF50; /* Un verde principal agradable */
+  --color-verde-oscuro: #0e3810;  /* Un verde más oscuro para hover o bordes */
+  --color-verde-claro: #C8E6C9;   /* Un verde claro para fondos suaves o acentos */
+  --color-texto-sobre-verde: #ffffff; /* Texto blanco para botones verdes */
+
+  /* Variables para el tema claro (predeterminado si no hay media query) */
+  --color-texto-principal: #213547;
+  --color-fondo-principal: #ffffff;
+  --color-enlace: var(--color-verde-primario);
+  --color-enlace-hover: var(--color-verde-oscuro);
+  --color-boton-fondo: #f0f0f0; /* Un gris claro para botones por defecto */
+  --color-boton-texto: #b59a9a;
+  --color-boton-borde-hover: var(--color-verde-primario);
+  --color-foco-outline: var(--color-verde-primario);
+
+
   color-scheme: light dark;
+  /* Ajustes para el tema oscuro por defecto de Vite */
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  background-color: #f4eded;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,56 +32,109 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Aplicamos variables al tema claro explícitamente */
+@media (prefers-color-scheme: light) {
+  :root {
+    color: var(--color-texto-principal);
+    background-color: var(--color-fondo-principal);
+  }
+  a {
+    color: var(--color-enlace);
+  }
+  a:hover {
+    color: var(--color-enlace-hover);
+  }
+  button {
+    background-color: var(--color-boton-fondo);
+    color: var(--color-boton-texto);
+    border: 1px solid #ccc; /* Un borde sutil para botones en tema claro */
+  }
+  button:hover {
+    border-color: var(--color-boton-borde-hover);
+  }
+  button:focus,
+  button:focus-visible {
+    outline: 4px auto var(--color-foco-outline);
+    /* O si prefieres un borde más sutil en foco:
+    border-color: var(--color-foco-outline);
+    box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25);
+    outline: none;
+    */
+  }
+}
+
+/* Aplicamos variables al tema oscuro (ajusta estos colores a tu gusto para el verde en oscuro) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-texto-principal-dark: rgba(255, 255, 255, 0.87);
+    --color-fondo-principal-dark: #f4eded;
+    --color-enlace-dark: var(--color-verde-primario); /* Verde también puede funcionar bien en oscuro */
+    --color-enlace-hover-dark: #a5d6a7; /* Un verde más claro para hover en oscuro */
+    --color-boton-fondo-dark: #8bca66; /* Botones un poco más claros que el fondo */
+    --color-boton-texto-dark: rgba(255, 255, 255, 0.87);
+    --color-boton-borde-hover-dark: var(--color-verde-primario);
+    --color-foco-outline-dark: var(--color-verde-primario);
+
+    color: var(--color-texto-principal-dark);
+    background-color: var(--color-fondo-principal-dark);
+  }
+  a {
+    color: var(--color-enlace-dark);
+  }
+  a:hover {
+    color: var(--color-enlace-hover-dark);
+  }
+  button {
+    background-color: var(--color-boton-fondo-dark);
+    color: var(--color-boton-texto-dark);
+    border: 1px solid #0e0e0e; /* Borde sutil para botones en tema oscuro */
+  }
+  button:hover {
+    border-color: var(--color-boton-borde-hover-dark);
+  }
+   button:focus,
+  button:focus-visible {
+    outline-color: var(--color-foco-outline-dark);
+     /* O si prefieres un borde más sutil en foco:
+    border-color: var(--color-foco-outline-dark);
+    box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25); // Ajusta el alfa para oscuro
+    outline: none;
+    */
+  }
+}
+
+
 a {
   font-weight: 500;
-  color: #646cff;
+  /* color y hover se definen ahora en las media queries */
   text-decoration: inherit;
+  transition: color 0.2s ease-in-out; /* Transición suave para enlaces */
 }
-a:hover {
-  color: #535bf2;
-}
+/* a:hover se define en las media queries */
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
+  /* display: flex; place-items: center; */ /* Comentado para permitir scroll y layout normal */
   min-width: 320px;
   min-height: 100vh;
+  /* font-family y otros se heredan de :root */
 }
 
 h1 {
-  font-size: 3.2em;
+  font-size: 2.2em; /* Ligeramente ajustado para consistencia */
   line-height: 1.1;
+  /* color se hereda */
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
+  border-radius: 6px; /* Un poco menos redondeado */
+  /* border se define en las media queries */
   padding: 0.6em 1.2em;
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
+  /* background-color y color se definen en las media queries */
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out; /* Transiciones añadidas */
 }
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
-}
+/* button:hover y focus se definen en las media queries */

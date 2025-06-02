@@ -1,0 +1,32 @@
+/* Añadir a App.css o a DetallePedidoModal.css */
+.detalle-pedido-seccion {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
+.detalle-pedido-seccion h3 {
+  margin-bottom: 10px;
+  font-size: 1.1em;
+  color: var(--color-verde-oscuro); /* Usando la paleta verde */
+}
+
+/* Puedes reutilizar .sub-table de App.css si lo tienes, 
+   o definirlo aquí si es específico para este modal.
+   Si .sub-table ya existe en App.css, estos son solo recordatorios/ajustes: */
+.sub-table { /* Si ya existe, asegúrate que es adecuado o crea una clase nueva */
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 5px;
+}
+.sub-table th,
+.sub-table td {
+  padding: 6px 8px; /* Un padding más ajustado para tablas de detalle */
+  text-align: left;
+  border: 1px solid #e0e6ed; /* Bordes en todas las celdas para mejor definición */
+  font-size: 0.85em;
+}
+.sub-table th {
+  background-color: #f2f2f2; /* Un fondo suave para cabeceras de sub-tablas */
+  font-weight: 600;
+}

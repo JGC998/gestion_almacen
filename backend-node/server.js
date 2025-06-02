@@ -8,7 +8,9 @@ const sqlite3 = require('sqlite3').verbose(); // verbose() para más detalles en
 // --- Importar funciones de db_operations.js ---
 const { consultarStockMateriasPrimas, 
         consultarItemStockPorId, 
-        procesarNuevoPedido 
+        procesarNuevoPedido,
+        consultarListaPedidos,
+        obtenerDetallesCompletosPedido
     } = require('./db_operations.js'); 
 
 
@@ -135,9 +137,9 @@ function crearTablasSiNoExisten() {
         db.run(`CREATE TABLE IF NOT EXISTS StockMateriasPrimas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER,
-            material_tipo TEXT NOT NULL CHECK(material_tipo IN ('GOMA', 'PVC', 'FIELTRO', 'MAQUINARIA')), /* MAQUINARIA añadido por si acaso */
+            material_tipo TEXT NOT NULL CHECK(material_tipo IN ('GOMA', 'PVC', 'FIELTRO', 'MAQUINARIA')),
             subtipo_material TEXT,
-            referencia_stock TEXT UNIQUE,
+            referencia_stock TEXT,
             fecha_entrada_almacen TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO')),
             espesor TEXT,
@@ -149,12 +151,17 @@ function crearTablasSiNoExisten() {
             color TEXT,
             ubicacion TEXT,
             notas TEXT,
-            origen_factura TEXT 
+            origen_factura TEXT,
             /* FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL */
+            UNIQUE (referencia_stock, subtipo_material, espesor, ancho, color)
         )`, (err) => {
-            if (err) console.error("Error creando tabla StockMateriasPrimas:", err.message);
-            else console.log("Tabla StockMateriasPrimas verificada/creada.");
+            if (err) {
+                console.error("Error creando tabla StockMateriasPrimas:", err.message); // Este mensaje te ayudará a ver el error si persiste
+            } else {
+                console.log("Tabla StockMateriasPrimas verificada/creada con nueva UNIQUE constraint.");
+            }
         });
+
 
         // --- Tabla: StockComponentes ---
         db.run(`CREATE TABLE IF NOT EXISTS StockComponentes (
@@ -252,6 +259,46 @@ app.get('/api/stock-item/:tabla/:id', async (req, res) => {
     }
 });
 
+app.get('/api/pedidos', async (req, res) => {
+    console.log('Node.js: Se ha solicitado GET /api/pedidos');
+    try {
+        // Los filtros vendrán como query parameters, ej: /api/pedidos?origen_tipo=NACIONAL&proveedor_like=MiProveedor
+        const filtros = req.query; 
+        console.log('Node.js: Filtros recibidos en /api/pedidos:', filtros);
+        
+        const pedidos = await consultarListaPedidos(filtros);
+        
+        console.log(`Node.js: Devolviendo ${pedidos.length} pedidos.`);
+        res.json(pedidos);
+    } catch (error) {
+        console.error("Error en el endpoint /api/pedidos:", error.message);
+        res.status(500).json({ error: "Error interno del servidor al obtener la lista de pedidos.", detalle: error.message });
+    }
+});
+
+app.get('/api/pedidos/:pedidoId/detalles', async (req, res) => {
+    const pedidoId = parseInt(req.params.pedidoId, 10);
+    console.log(`Node.js: Se ha solicitado GET /api/pedidos/${pedidoId}/detalles`);
+
+    if (isNaN(pedidoId) || pedidoId <= 0) {
+        return res.status(400).json({ error: "ID de pedido no válido." });
+    }
+
+    try {
+        const detallesPedido = await obtenerDetallesCompletosPedido(pedidoId);
+        
+        if (detallesPedido) {
+            console.log(`Node.js: Devolviendo detalles para el pedido ID ${pedidoId}.`);
+            res.json(detallesPedido);
+        } else {
+            console.log(`Node.js: No se encontró el pedido con ID ${pedidoId}.`);
+            res.status(404).json({ error: `No se encontró el pedido con ID ${pedidoId}.` });
+        }
+    } catch (error) {
+        console.error(`Error en el endpoint /api/pedidos/${pedidoId}/detalles:`, error.message);
+        res.status(500).json({ error: "Error interno del servidor al obtener los detalles del pedido.", detalle: error.message });
+    }
+});
 
 // --- LÓGICA DE CÁLCULO DE COSTES AUXILIAR ---
 function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
