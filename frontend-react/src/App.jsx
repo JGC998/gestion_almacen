@@ -4,6 +4,7 @@ import './App.css';
 import FormularioPedidoNacional from './components/FormularioPedidoNacional.jsx';
 import FormularioPedidoImportacion from './components/FormularioPedidoImportacion.jsx';
 import ListaPedidos from './ListaPedidos.jsx'; 
+import TarifaVenta from './components/TarifaVenta.jsx'; 
 
 
 // --- Componente Modal Simple para Detalles del Stock (Bobina) ---
@@ -185,6 +186,8 @@ function App() {
         return <ListaPedidos />;
       case 'IMPORTACION':
         return <FormularioPedidoImportacion />;
+      case 'TARIFA_VENTA': 
+        return <TarifaVenta />;
       case 'STOCK':
       default:
         if (loadingStock) return <p>Cargando stock...</p>;
@@ -290,6 +293,7 @@ function App() {
       <nav className="app-nav">
         <button onClick={() => setVistaActual('STOCK')} disabled={vistaActual === 'STOCK'}>Ver Stock</button>
         <button onClick={() => setVistaActual('LISTA_PEDIDOS')} disabled={vistaActual === 'LISTA_PEDIDOS'}>Ver Pedidos</button>
+        <button onClick={() => setVistaActual('TARIFA_VENTA')} disabled={vistaActual === 'TARIFA_VENTA'}>Ver Tarifa Venta</button> 
         <button onClick={() => setVistaActual('NACIONAL')} disabled={vistaActual === 'NACIONAL'}>Nuevo Pedido Nacional</button>
         <button onClick={() => setVistaActual('IMPORTACION')} disabled={vistaActual === 'IMPORTACION'}>Nuevo Pedido Importación</button>
       </nav>

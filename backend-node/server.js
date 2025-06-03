@@ -11,7 +11,9 @@ const { consultarStockMateriasPrimas,
         procesarNuevoPedido,
         consultarListaPedidos,
         obtenerDetallesCompletosPedido,
-        actualizarEstadoStockItem
+        actualizarEstadoStockItem,
+        eliminarPedidoCompleto,
+        obtenerConfiguraciones
     } = require('./db_operations.js'); 
 
 
@@ -485,6 +487,132 @@ app.patch('/api/stock-items/:stockItemId/estado', async (req, res) => {
         res.status(500).json({ error: "Error interno del servidor al actualizar el estado del ítem de stock.", detalle: error.message });
     }
 });
+
+app.delete('/api/pedidos/:pedidoId', async (req, res) => {
+    const pedidoId = parseInt(req.params.pedidoId, 10);
+    console.log(`Node.js: Se ha solicitado DELETE /api/pedidos/${pedidoId}`);
+
+    if (isNaN(pedidoId) || pedidoId <= 0) {
+        return res.status(400).json({ error: "ID de pedido no válido." });
+    }
+
+    try {
+        const resultado = await eliminarPedidoCompleto(pedidoId);
+        console.log(`Node.js: Pedido ID ${pedidoId} procesado para eliminación.`);
+        res.json(resultado); // Devuelve el objeto con el resumen de eliminaciones
+    } catch (error) {
+        console.error(`Error en DELETE /api/pedidos/${pedidoId}:`, error.message);
+        if (error.message.includes("no encontrado")) {
+            return res.status(404).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor al eliminar el pedido.", detalle: error.message });
+    }
+});
+
+
+
+// --- ENDPOINT PARA TARIFA DE VENTA (Fase 4.1) ---
+
+
+app.get('/api/tarifa-venta', async (req, res) => {
+    const { tipo_cliente } = req.query; // Ej: 'final', 'fabricante', 'metrajes'
+
+    console.log(`Node.js: Se ha solicitado GET /api/tarifa-venta para tipo_cliente: ${tipo_cliente}`);
+
+    if (!tipo_cliente) {
+        return res.status(400).json({ error: "El parámetro 'tipo_cliente' es requerido." });
+    }
+    // Normalizar el tipo_cliente a minúsculas para que coincida con las claves de configuración
+    const tipoClienteNormalizado = tipo_cliente.toLowerCase(); 
+    
+    // Validar que el tipo_cliente sea uno de los esperados
+    const tiposClienteValidos = ['final', 'fabricante', 'metrajes'];
+    if (!tiposClienteValidos.includes(tipoClienteNormalizado)) {
+        return res.status(400).json({ error: `Valor de 'tipo_cliente' no válido. Valores permitidos: ${tiposClienteValidos.join(', ')}.` });
+    }
+
+    try {
+        const configuraciones = await obtenerConfiguraciones();
+        const todosLosStockItems = await consultarStockMateriasPrimas();
+        const stockItemsRelevantes = todosLosStockItems.filter(
+            item => item.status === 'DISPONIBLE' || item.status === 'EMPEZADA'
+        );
+
+        if (stockItemsRelevantes.length === 0) {
+            return res.json([]);
+        }
+
+        const gruposDeStock = {};
+        stockItemsRelevantes.forEach(item => {
+            const material = (item.material_tipo || 'DESCONOCIDO').toUpperCase();
+            const subtipo = item.subtipo_material || 'N/A';
+            const espesor = item.espesor || 'N/A';
+            const claveGrupo = `${material}-${subtipo}-${espesor}`;
+            
+            if (!gruposDeStock[claveGrupo]) {
+                gruposDeStock[claveGrupo] = {
+                    material_tipo: material,
+                    subtipo_material: subtipo,
+                    espesor: espesor,
+                    items: []
+                };
+            }
+            gruposDeStock[claveGrupo].items.push(item);
+        });
+
+        const tarifaVenta = [];
+        for (const claveGrupo in gruposDeStock) {
+            const grupo = gruposDeStock[claveGrupo];
+            let maxCost = 0;
+            grupo.items.forEach(item => {
+                if (item.coste_unitario_final > maxCost) {
+                    maxCost = item.coste_unitario_final;
+                }
+            });
+            
+            // --- SECCIÓN MODIFICADA PARA SELECCIÓN DE MARGEN ---
+            // Usaremos solo los márgenes por defecto para el tipo de cliente especificado.
+            // Ej: 'margen_default_final', 'margen_default_fabricante', 'margen_default_metrajes'
+            const claveMargenCliente = `margen_default_${tipoClienteNormalizado}`;
+            
+            let margenAplicado = configuraciones[claveMargenCliente];
+            
+            // Si no se encuentra un margen específico para ese tipo de cliente, usamos 0 como fallback.
+            if (margenAplicado === undefined) {
+                console.warn(`Margen no encontrado para la clave '${claveMargenCliente}'. Usando 0.`);
+                margenAplicado = 0;
+            }
+            
+            margenAplicado = parseFloat(margenAplicado);
+            if (isNaN(margenAplicado)) {
+                console.warn(`Margen para '${claveMargenCliente}' no es numérico ('${configuraciones[claveMargenCliente]}'). Usando 0.`);
+                margenAplicado = 0;
+            }
+            // --- FIN DE SECCIÓN MODIFICADA ---
+
+            const precioVenta = maxCost * (1 + margenAplicado);
+
+            tarifaVenta.push({
+                material_tipo: grupo.material_tipo,
+                subtipo_material: grupo.subtipo_material,
+                espesor: grupo.espesor,
+                tipo_cliente_aplicado: tipoClienteNormalizado,
+                coste_maximo_grupo: parseFloat(maxCost.toFixed(4)),
+                margen_aplicado: parseFloat(margenAplicado.toFixed(4)),
+                precio_venta_calculado: parseFloat(precioVenta.toFixed(4))
+            });
+        }
+        
+        console.log(`Tarifa de venta generada para tipo_cliente: ${tipoClienteNormalizado}`);
+        res.json(tarifaVenta);
+
+    } catch (error) {
+        console.error("Error en el endpoint /api/tarifa-venta:", error.message, error.stack);
+        res.status(500).json({ error: "Error interno del servidor al generar la tarifa de venta.", detalle: error.message });
+    }
+});
+
+
 
 
 app.listen(PORT, () => {

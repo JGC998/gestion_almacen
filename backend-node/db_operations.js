@@ -590,6 +590,132 @@ function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
     });
 }
 
+// backend-node/db_operations.js
+
+// ... (tu código existente: conectarDB, consultarListaPedidos, obtenerDetallesCompletosPedido, etc.) ...
+
+/**
+ * Elimina un pedido completo y todos sus datos asociados (gastos, líneas de pedido originales, y stock items generados).
+ * Utiliza una transacción.
+ * @param {number} pedidoId - El ID del pedido a eliminar.
+ * @returns {Promise<object>} Promesa que resuelve a un objeto con el número de filas afectadas en cada tabla.
+ */
+async function eliminarPedidoCompleto(pedidoId) {
+    const db = conectarDB();
+    
+    // Helper para ejecutar una query dentro de la transacción
+    const runQuery = (sql, params = []) => {
+        return new Promise((resolve, reject) => {
+            db.run(sql, params, function(err) { // No usar arrow function para acceder a this.changes
+                if (err) return reject(err);
+                resolve(this.changes);
+            });
+        });
+    };
+
+    try {
+        await runQuery('BEGIN TRANSACTION;');
+        console.log(`Iniciando transacción para eliminar pedido ID: ${pedidoId}`);
+
+        // 1. Eliminar StockMateriasPrimas asociadas (¡CUIDADO! Esto borra el stock de este pedido)
+        // Si prefieres SET NULL para pedido_id en StockMateriasPrimas:
+        // const stockChanges = await runQuery('UPDATE StockMateriasPrimas SET pedido_id = NULL WHERE pedido_id = ?', [pedidoId]);
+        const stockChanges = await runQuery('DELETE FROM StockMateriasPrimas WHERE pedido_id = ?', [pedidoId]);
+        console.log(`StockMateriasPrimas eliminadas para pedido ID ${pedidoId}: ${stockChanges} filas`);
+
+        // 2. Eliminar GastosPedido asociados
+        const gastosChanges = await runQuery('DELETE FROM GastosPedido WHERE pedido_id = ?', [pedidoId]);
+        console.log(`GastosPedido eliminados para pedido ID ${pedidoId}: ${gastosChanges} filas`);
+        
+        // 3. Eliminar LineasPedido asociadas (si tuvieras claves foráneas ON DELETE CASCADE, esto sería automático)
+        // Asumiendo que quieres borrar las líneas de pedido originales también.
+        const lineasPedidoChanges = await runQuery('DELETE FROM LineasPedido WHERE pedido_id = ?', [pedidoId]);
+        console.log(`LineasPedido eliminadas para pedido ID ${pedidoId}: ${lineasPedidoChanges} filas`);
+
+        // 4. Eliminar el PedidoPrincipal de PedidosProveedores
+        const pedidoPrincipalChanges = await runQuery('DELETE FROM PedidosProveedores WHERE id = ?', [pedidoId]);
+        console.log(`PedidosProveedores eliminado para ID ${pedidoId}: ${pedidoPrincipalChanges} filas`);
+
+        if (pedidoPrincipalChanges === 0) {
+            // Si el pedido principal no se encontró, es posible que queramos hacer rollback
+            // aunque las otras eliminaciones podrían no haber afectado filas si el ID no existía.
+            await runQuery('ROLLBACK;');
+            console.log(`Pedido ID ${pedidoId} no encontrado. Transacción revertida.`);
+            throw new Error(`Pedido con ID ${pedidoId} no encontrado.`);
+        }
+
+        await runQuery('COMMIT;');
+        console.log(`Pedido ID ${pedidoId} y sus datos asociados eliminados exitosamente. Transacción completada.`);
+        
+        return {
+            pedidoPrincipalEliminado: pedidoPrincipalChanges,
+            gastosEliminados: gastosChanges,
+            lineasPedidoEliminadas: lineasPedidoChanges,
+            stockItemsEliminados: stockChanges,
+            mensaje: `Pedido ID ${pedidoId} y datos asociados eliminados.`
+        };
+
+    } catch (error) {
+        console.error(`Error en la transacción de eliminarPedidoCompleto para ID ${pedidoId}, revirtiendo:`, error.message);
+        try {
+            await runQuery('ROLLBACK;'); // Intenta hacer rollback
+        } catch (rollbackError) {
+            console.error("Error al intentar hacer ROLLBACK:", rollbackError.message);
+        }
+        throw error; // Propagar el error original
+    } finally {
+        if (db && db.open) {
+            db.close((closeErr) => {
+                if (closeErr) {
+                    console.error("Error cerrando la DB después de eliminarPedidoCompleto:", closeErr.message);
+                }
+            });
+        }
+    }
+}
+
+
+/**
+ * Obtiene todas las configuraciones de la tabla Configuracion.
+ * @returns {Promise<Object>} Un objeto donde las claves son las 'clave' de la tabla y los valores son los 'valor'.
+ */
+function obtenerConfiguraciones() {
+    return new Promise((resolve, reject) => {
+        const db = conectarDB();
+        const sql = `SELECT clave, valor FROM Configuracion`;
+
+        db.all(sql, [], (err, rows) => {
+            db.close((closeErr) => {
+                if (closeErr) {
+                    console.error("Error cerrando la DB después de obtener configuraciones:", closeErr.message);
+                }
+            });
+            if (err) {
+                console.error("Error al obtener configuraciones:", err.message);
+                return reject(err);
+            }
+            
+            // Convertir el array de filas en un objeto clave-valor
+            const configuraciones = {};
+            rows.forEach(row => {
+                // Intentar parsear el valor como JSON si es un objeto o array stringificado,
+                // o como número si parece un número.
+                try {
+                    configuraciones[row.clave] = JSON.parse(row.valor);
+                } catch (e) {
+                    // Si no es JSON válido, verificar si es un número
+                    const num = parseFloat(row.valor);
+                    if (!isNaN(num) && isFinite(row.valor)) {
+                        configuraciones[row.clave] = num;
+                    } else {
+                        configuraciones[row.clave] = row.valor; // Dejar como string si no es JSON ni número
+                    }
+                }
+            });
+            resolve(configuraciones);
+        });
+    });
+}
 
 
 
@@ -599,6 +725,8 @@ module.exports = {
     procesarNuevoPedido,
     consultarListaPedidos,
     obtenerDetallesCompletosPedido,
-    actualizarEstadoStockItem
+    actualizarEstadoStockItem,
+    eliminarPedidoCompleto,
+    obtenerConfiguraciones
 };
 

@@ -32,6 +32,7 @@
         * Almacenar y mostrar los datos del stock en una tabla HTML (ahora como lista plana de bobinas individuales, ordenada).
         * Manejar estados de carga y errores.
     * Verificación exitosa de la comunicación React -> Node.js API -> SQLite y visualización de datos del stock.
+* [X] Script de siembra (`seed_database.js`) creado para poblar la base de datos con datos de prueba, incluyendo configuración de márgenes.
 
 ## Fase 1: Funcionalidad Básica de Stock (Lectura Avanzada y Escritura)
 
@@ -100,29 +101,30 @@
     * **Tarea:** Implementar la funcionalidad para marcar items de stock (bobinas) como "EMPEZADA" o "AGOTADO".
     * **Backend (API):** Endpoint `PATCH /api/stock-items/:stockItemId/estado` para actualizar el estado.
     * **Frontend (React):** Botones/acciones en la tabla de stock (`App.jsx`) para cambiar el estado.
-    * **Entrega:** Funcionalidad completa para cambiar el estado (pendiente de testeo exhaustivo por el usuario).
+    * **Entrega:** Funcionalidad completa para cambiar el estado.
 
-### 3.3. Backend y Frontend - Eliminar Pedidos/Contenedores (PENDIENTE)
+### 3.3. Backend y Frontend - Eliminar Pedidos/Contenedores (COMPLETADO)
     * **Tarea:** Implementar la funcionalidad para eliminar un pedido/contenedor completo.
-    * **Backend (API):** Endpoint para eliminar (`DELETE`). Considerar eliminación en cascada o manejo de stock asociado.
-    * **Frontend (React):** Botón de eliminar con confirmación.
+    * **Backend (API):** Endpoint `DELETE /api/pedidos/:pedidoId`. Considera eliminación en cascada o manejo de stock asociado (actualmente elimina stock asociado).
+    * **Frontend (React):** Botón de eliminar en `ListaPedidos.jsx` con confirmación.
     * **Entrega:** Capacidad de eliminar pedidos/contenedores.
 
 ## Fase 4: Cálculo de Costes de Venta y Tarifa
 
-### 4.1. Backend (Node.js API) - Endpoint para Tarifa de Venta (PENDIENTE)
+### 4.1. Backend (Node.js API) - Endpoint para Tarifa de Venta (COMPLETADO)
     * **Tarea:** Crear un endpoint `GET /api/tarifa-venta`.
     * **Detalles:**
-        * Obtener datos de stock (`coste_unitario_final` de `StockMateriasPrimas`).
-        * Obtener márgenes de la tabla `Configuracion` (necesitaremos una función en `db_operations.js` para esto).
-        * Reimplementar la lógica de agrupación (material, subtipo, espesor) y cálculo del `max_cost` por grupo.
-        * Aplicar márgenes para calcular precios de venta.
+        * Obtener datos de stock (`coste_unitario_final` de `StockMateriasPrimas` para items 'DISPONIBLE' o 'EMPEZADA').
+        * Obtener márgenes de la tabla `Configuracion` (función `obtenerConfiguraciones` en `db_operations.js`). Márgenes por `tipo_cliente` (final, fabricante, metrajes).
+        * Lógica de agrupación (material, subtipo, espesor) y cálculo del `max_cost` por grupo.
+        * Aplicar márgenes para calcular precios de venta según `tipo_cliente` (parámetro query).
         * Devolver como JSON.
     * **Entrega:** Endpoint que provee los datos para la tarifa.
 
-### 4.2. Frontend (React) - Vista de Tarifa de Venta (PENDIENTE)
-    * **Tarea:** Crear un componente React para mostrar la tarifa.
-    * **Entrega:** Interfaz para visualizar la tarifa de venta.
+### 4.2. Frontend (React) - Vista de Tarifa de Venta (EN PROGRESO)
+    * **Tarea:** Crear un componente React (`TarifaVenta.jsx`) para mostrar la tarifa.
+    * **Detalles:** Selector para `tipo_cliente`. Tabla para mostrar los datos de la tarifa (material, subtipo, espesor, coste máx., margen, precio venta).
+    * **Entrega:** Interfaz para visualizar la tarifa de venta (código proporcionado, pendiente de testeo por el usuario).
 
 ## Fase 5: Gestión de Maquinaria y Costes de Fabricación (PENDIENTE)
 
@@ -132,5 +134,11 @@
 ## Fase 6: Mejoras Continuas y Refinamiento (PENDIENTE)
 
 * **Tareas:** Refactorización, optimización, mejoras UX/UI, documentación, pruebas. Considerar empaquetado como aplicación de escritorio (Electron/Tauri) si se desea.
+* **Idea:** Añadir funcionalidad para "Editar Pedido/Contenedor".
 
 ---
+He añadido una nota sobre el script de siembra en la Fase 0 y actualizado los puntos 3.2, 3.3 y 4.1 a "COMPLETADO", y el 4.2 a "EN PROGRESO" ya que te acabo de dar el código y falta que lo pruebes.
+
+### Parte 2: Mensaje de Commit Sugerido
+
+Para todo el trabajo realizado desde la última vez que hicimos un commit (que cubrió la visualización detallada de pedidos) hasta ahora (implementación de tarifa de venta), un mensaje de commit podría ser:
