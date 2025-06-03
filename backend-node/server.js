@@ -1,87 +1,87 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path'); // Necesario para la ruta a la DB
-const sqlite3 = require('sqlite3').verbose(); // verbose() para más detalles en errores
-
-//Importaciones
+const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs'); // Para crear el directorio si no existe
 
 // --- Importar funciones de db_operations.js ---
-const { consultarStockMateriasPrimas, 
-        consultarItemStockPorId, 
-        procesarNuevoPedido,
-        consultarListaPedidos,
-        obtenerDetallesCompletosPedido,
-        actualizarEstadoStockItem,
-        eliminarPedidoCompleto,
-        obtenerConfiguraciones
-    } = require('./db_operations.js'); 
+const {
+    consultarStockMateriasPrimas,
+    consultarItemStockPorId,
+    procesarNuevoPedido,
+    consultarListaPedidos,
+    obtenerDetallesCompletosPedido,
+    actualizarEstadoStockItem,
+    eliminarPedidoCompleto,
+    obtenerConfiguraciones,
+
+    // Nuevas importaciones para la Fase 5
+    insertarProductoTerminado,
+    consultarProductosTerminados,
+    consultarProductoTerminadoPorId,
+    actualizarProductoTerminado,
+    eliminarProductoTerminado,
+
+    insertarMaquinaria,
+    consultarMaquinaria,
+    consultarMaquinariaPorId,
+    actualizarMaquinaria,
+    eliminarMaquinaria,
+
+    insertarReceta,
+    consultarRecetas,
+    consultarRecetaPorId,
+    actualizarReceta,
+    eliminarReceta,
+
+    insertarProcesoFabricacion,
+    consultarProcesosFabricacion,
+    consultarProcesoFabricacionPorId,
+    actualizarProcesoFabricacion,
+    eliminarProcesoFabricacion,
+
+    insertarOrdenProduccion,
+    consultarOrdenesProduccion,
+    consultarOrdenProduccionPorId,
+    actualizarOrdenProduccion,
+    eliminarOrdenProduccion,
+    procesarOrdenProduccion, // Función clave para la producción
+
+    insertarStockProductoTerminado, // Aunque no haya CRUD completo, se usa en procesarOrdenProduccion
+    consultarStockProductosTerminados, // Para la vista de stock de PT
+    consultarStockProductoTerminadoPorId,
+    actualizarStockProductoTerminado,
+    eliminarStockProductoTerminado,
+
+    actualizarCosteFabricacionEstandar // Para recalcular el coste estándar
+} = require('./db_operations.js');
 
 
 const app = express();
-const PORT = process.env.PORT || 5002; // Usamos 5002 para evitar conflictos
-
+const PORT = process.env.PORT || 5002;
 
 // Middlewares
-app.use(cors());    
+app.use(cors());
 app.use(express.json());
 
-
-// --- NUEVO ENDPOINT PARA OBTENER DETALLES DE UN ÍTEM DE STOCK ESPECÍFICO ---
-app.get('/api/stock-item/:tabla/:id', async (req, res) => {
-    const tablaItem = req.params.tabla;
-    const idItem = parseInt(req.params.id, 10); // Convertir el ID a número entero
-
-    console.log(`Node.js: Se ha solicitado GET /api/stock-item/${tablaItem}/${idItem}`);
-
-    // Validación básica de los parámetros
-    if (!['StockMateriasPrimas', 'StockComponentes'].includes(tablaItem)) {
-        return res.status(400).json({ error: "Nombre de tabla no válido." });
-    }
-    if (isNaN(idItem) || idItem <= 0) {
-        return res.status(400).json({ error: "ID de ítem no válido." });
-    }
-
-    try {
-        const item = await consultarItemStockPorId(idItem, tablaItem);
-        
-        if (item) {
-            console.log(`Node.js: Devolviendo detalles para ${tablaItem} ID ${idItem}.`);
-            res.json(item);
-        } else {
-            console.log(`Node.js: No se encontró ${tablaItem} con ID ${idItem}.`);
-            res.status(404).json({ error: `No se encontró ${tablaItem} con ID ${idItem}.` });
-        }
-    } catch (error) {
-        console.error(`Error en el endpoint /api/stock-item/${tablaItem}/${idItem}:`, error.message);
-        // Revisar si el error ya fue por 'Tabla no válida' desde db_operations
-        if (error.message && error.message.startsWith("Tabla no válida")) {
-             return res.status(400).json({ error: error.message });
-        }
-        res.status(500).json({ error: "Error interno del servidor al obtener el ítem de stock.", detalle: error.message });
-    }
-});
-
-
 // --- Configuración de la Base de Datos SQLite ---
-// Definimos la ruta a la base de datos. Asumimos que estará en backend-node/almacen/almacen.db
-const dbPath = path.resolve(__dirname, 'almacen', 'almacen.db');
-console.log(`Ruta a la base de datos: ${dbPath}`);
-
-// Crear la carpeta 'almacen' si no existe (solo para asegurar)
-const fs = require('fs');
 const almacenDir = path.resolve(__dirname, 'almacen');
+const dbPath = path.resolve(almacenDir, 'almacen.db');
+
 if (!fs.existsSync(almacenDir)){
     fs.mkdirSync(almacenDir, { recursive: true });
     console.log(`Directorio '${almacenDir}' creado.`);
 }
 
-// Conectar a la base de datos (o crearla si no existe)
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("Error al conectar/crear la base de datos SQLite:", err.message);
     } else {
         console.log("Conectado a la base de datos SQLite.");
-        // Aquí podríamos llamar a una función para crear tablas si no existen
+        db.exec('PRAGMA foreign_keys = ON;', (err) => {
+            if (err) console.error("Error al habilitar foreign keys en conexión principal:", err.message);
+            else console.log("Foreign keys habilitadas.");
+        });
         crearTablasSiNoExisten();
     }
 });
@@ -105,7 +105,6 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla PedidosProveedores verificada/creada.");
         });
 
-        // --- Tabla: LineasPedido ---
         db.run(`CREATE TABLE IF NOT EXISTS LineasPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER NOT NULL,
@@ -120,7 +119,6 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla LineasPedido verificada/creada.");
         });
 
-        // --- Tabla: GastosPedido ---
         db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER NOT NULL,
@@ -133,16 +131,12 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla GastosPedido verificada/creada.");
         });
 
-        // --- Tabla: StockMateriasPrimas ---
-        // (Asegúrate de que esta definición coincida exactamente con lo que necesitas y tu versión anterior)
-        // He mantenido la Foreign Key comentada como en tu database.py original.
-        // Si la quieres habilitar, descoméntala y asegúrate que PRAGMA foreign_keys = ON; se ejecute al conectar a la DB.
         db.run(`CREATE TABLE IF NOT EXISTS StockMateriasPrimas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER,
-            material_tipo TEXT NOT NULL CHECK(material_tipo IN ('GOMA', 'PVC', 'FIELTRO', 'MAQUINARIA')),
+            material_tipo TEXT NOT NULL CHECK(material_tipo IN ('GOMA', 'PVC', 'FIELTRO', 'MAQUINARIA', 'COMPONENTE')),
             subtipo_material TEXT,
-            referencia_stock TEXT,
+            referencia_stock TEXT NOT NULL,
             fecha_entrada_almacen TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO')),
             espesor TEXT,
@@ -150,23 +144,19 @@ function crearTablasSiNoExisten() {
             largo_inicial REAL,
             largo_actual REAL,
             unidad_medida TEXT NOT NULL DEFAULT 'm',
-            coste_unitario_final REAL, 
+            coste_unitario_final REAL,
             color TEXT,
             ubicacion TEXT,
             notas TEXT,
             origen_factura TEXT,
-            /* FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL */
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL,
             UNIQUE (referencia_stock, subtipo_material, espesor, ancho, color)
         )`, (err) => {
-            if (err) {
-                console.error("Error creando tabla StockMateriasPrimas:", err.message); // Este mensaje te ayudará a ver el error si persiste
-            } else {
-                console.log("Tabla StockMateriasPrimas verificada/creada con nueva UNIQUE constraint.");
-            }
+            if (err) console.error("Error creando tabla StockMateriasPrimas:", err.message);
+            else console.log("Tabla StockMateriasPrimas verificada/creada.");
         });
 
 
-        // --- Tabla: StockComponentes ---
         db.run(`CREATE TABLE IF NOT EXISTS StockComponentes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             componente_ref TEXT NOT NULL UNIQUE,
@@ -180,45 +170,135 @@ function crearTablasSiNoExisten() {
             status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'RESERVADO', 'DESCATALOGADO')),
             ubicacion TEXT,
             notas TEXT,
-            origen_factura TEXT
-            /* FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL */
+            origen_factura TEXT,
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL
         )`, (err) => {
             if (err) console.error("Error creando tabla StockComponentes:", err.message);
             else console.log("Tabla StockComponentes verificada/creada.");
         });
 
-        // --- Tabla Configuracion ---
         db.run(`CREATE TABLE IF NOT EXISTS Configuracion (
             clave TEXT PRIMARY KEY,
             valor TEXT
         )`, (err) => {
             if (err) console.error("Error creando tabla Configuracion:", err.message);
-            else console.log("Tabla Configuracion verificada/creada.");
+            else {
+                console.log("Tabla Configuracion verificada/creada.");
+                // Insertar valores por defecto si no existen
+                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_final', '0.50']);
+                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_fabricante', '0.30']);
+                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_metrajes', '0.60']);
+                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['coste_mano_obra_default', '20.00']); // Nuevo valor por defecto
+            }
         });
 
-        // Crear índices (opcional pero recomendado para rendimiento en tablas grandes)
-        // No los incluyo todos aquí para brevedad, pero puedes añadirlos si lo deseas
-        // Ejemplo: db.run("CREATE INDEX IF NOT EXISTS idx_pp_numero_factura ON PedidosProveedores (numero_factura);");
-        
+        // --- NUEVAS TABLAS PARA LA FASE 5 ---
+
+        db.run(`CREATE TABLE IF NOT EXISTS ProductosTerminados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            referencia TEXT NOT NULL UNIQUE,
+            nombre TEXT NOT NULL,
+            descripcion TEXT,
+            unidad_medida TEXT NOT NULL DEFAULT 'unidad',
+            coste_fabricacion_estandar REAL,
+            margen_venta_default REAL,
+            precio_venta_sugerido REAL,
+            fecha_creacion TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK(status IN ('ACTIVO', 'DESCATALOGADO', 'OBSOLETO'))
+        )`, (err) => {
+            if (err) console.error("Error creando tabla ProductosTerminados:", err.message);
+            else console.log("Tabla ProductosTerminados verificada/creada.");
+        });
+
+        db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL UNIQUE,
+            descripcion TEXT,
+            coste_adquisicion REAL,
+            coste_hora_operacion REAL -- Se eliminan vida_util_horas y depreciacion_hora
+        )`, (err) => {
+            if (err) console.error("Error creando tabla Maquinaria:", err.message);
+            else console.log("Tabla Maquinaria verificada/creada.");
+        });
+
+        db.run(`CREATE TABLE IF NOT EXISTS Recetas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_terminado_id INTEGER NOT NULL,
+            material_id INTEGER,
+            componente_id INTEGER,
+            -- Se eliminan cantidad_requerida y unidad_medida_requerida
+            notas TEXT,
+            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
+            FOREIGN KEY(material_id) REFERENCES StockMateriasPrimas(id) ON DELETE CASCADE,
+            FOREIGN KEY(componente_id) REFERENCES StockComponentes(id) ON DELETE CASCADE,
+            UNIQUE (producto_terminado_id, material_id),
+            UNIQUE (producto_terminado_id, componente_id)
+        )`, (err) => {
+            if (err) console.error("Error creando tabla Recetas:", err.message);
+            else console.log("Tabla Recetas verificada/creada.");
+        });
+
+        db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_terminado_id INTEGER NOT NULL,
+            maquinaria_id INTEGER NOT NULL,
+            nombre_proceso TEXT NOT NULL,
+            tiempo_estimado_horas REAL NOT NULL,
+            -- Se elimina coste_mano_obra_hora, ahora es global
+            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
+            FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id) ON DELETE RESTRICT
+        )`, (err) => {
+            if (err) console.error("Error creando tabla ProcesosFabricacion:", err.message);
+            else console.log("Tabla ProcesosFabricacion verificada/creada.");
+        });
+
+        db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_terminado_id INTEGER NOT NULL,
+            cantidad_a_producir REAL NOT NULL,
+            fecha TEXT NOT NULL, -- Un solo campo de fecha
+            status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK(status IN ('PENDIENTE', 'EN_PROCESO', 'COMPLETADA', 'CANCELADA')), -- Mantener status interno para lógica
+            coste_real_fabricacion REAL,
+            observaciones TEXT,
+            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE RESTRICT
+        )`, (err) => {
+            if (err) console.error("Error creando tabla OrdenesProduccion:", err.message);
+            else console.log("Tabla OrdenesProduccion verificada/creada.");
+        });
+
+        db.run(`CREATE TABLE IF NOT EXISTS StockProductosTerminados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_id INTEGER NOT NULL,
+            orden_produccion_id INTEGER,
+            cantidad_actual REAL NOT NULL,
+            unidad_medida TEXT NOT NULL DEFAULT 'unidad',
+            coste_unitario_final REAL NOT NULL,
+            fecha_entrada_almacen TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'RESERVADO', 'AGOTADO', 'DAÑADO')),
+            ubicacion TEXT,
+            notas TEXT,
+            FOREIGN KEY(producto_id) REFERENCES ProductosTerminados(id) ON DELETE RESTRICT,
+            FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
+        )`, (err) => {
+            if (err) console.error("Error creando tabla StockProductosTerminados:", err.message);
+            else console.log("Tabla StockProductosTerminados verificada/creada.");
+        });
+
         console.log("Verificación/Creación de todas las tablas esenciales completada.");
     });
 }
 
 
-
-
-// --- Rutas de la API ---
+// --- Rutas de la API (Endpoints existentes) ---
 app.get('/api/estado', (req, res) => {
     console.log('Node.js: Se ha solicitado GET /api/estado');
     res.json({ estado: 'Servidor Backend Node.js funcionando correctamente!' });
 });
 
-
-
 app.get('/api/stock', async (req, res) => {
     console.log('Node.js: Se ha solicitado GET /api/stock');
     try {
-        const filtros = req.query; 
+        const filtros = req.query;
         console.log('Node.js: Filtros recibidos en /api/stock:', filtros);
         const stockItems = await consultarStockMateriasPrimas(filtros);
         console.log(`Node.js: Devolviendo ${stockItems.length} items de stock (con filtros aplicados).`);
@@ -229,7 +309,6 @@ app.get('/api/stock', async (req, res) => {
     }
 });
 
-// --- NUEVO ENDPOINT PARA OBTENER DETALLES DE UN ÍTEM DE STOCK ESPECÍFICO ---
 app.get('/api/stock-item/:tabla/:id', async (req, res) => {
     const tablaItem = req.params.tabla;
     const idItem = parseInt(req.params.id, 10);
@@ -245,7 +324,7 @@ app.get('/api/stock-item/:tabla/:id', async (req, res) => {
 
     try {
         const item = await consultarItemStockPorId(idItem, tablaItem);
-        
+
         if (item) {
             console.log(`Node.js: Devolviendo detalles para ${tablaItem} ID ${idItem}.`);
             res.json(item);
@@ -265,12 +344,11 @@ app.get('/api/stock-item/:tabla/:id', async (req, res) => {
 app.get('/api/pedidos', async (req, res) => {
     console.log('Node.js: Se ha solicitado GET /api/pedidos');
     try {
-        // Los filtros vendrán como query parameters, ej: /api/pedidos?origen_tipo=NACIONAL&proveedor_like=MiProveedor
-        const filtros = req.query; 
+        const filtros = req.query;
         console.log('Node.js: Filtros recibidos en /api/pedidos:', filtros);
-        
+
         const pedidos = await consultarListaPedidos(filtros);
-        
+
         console.log(`Node.js: Devolviendo ${pedidos.length} pedidos.`);
         res.json(pedidos);
     } catch (error) {
@@ -289,7 +367,7 @@ app.get('/api/pedidos/:pedidoId/detalles', async (req, res) => {
 
     try {
         const detallesPedido = await obtenerDetallesCompletosPedido(pedidoId);
-        
+
         if (detallesPedido) {
             console.log(`Node.js: Devolviendo detalles para el pedido ID ${pedidoId}.`);
             res.json(detallesPedido);
@@ -303,60 +381,55 @@ app.get('/api/pedidos/:pedidoId/detalles', async (req, res) => {
     }
 });
 
-// --- LÓGICA DE CÁLCULO DE COSTES AUXILIAR ---
+// Lógica de cálculo de costes de línea (modificada para gastos repercutibles)
 function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
     let costeTotalPedidoSinGastosEnMonedaOriginal = 0;
-    
+
     const lineasConPrecioBase = lineasItems.map(linea => {
         const cantidad = parseFloat(linea.cantidad_original) || 0;
         const precioUnitarioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-        
-        // Convertir a EUR si hay valor de conversión y la moneda no es EUR explícitamente
-        // (Si es nacional, valorConversion será 1 y moneda_original debería ser EUR)
-        // Si moneda_original es, por ejemplo, USD, y valorConversion es la tasa USD->EUR.
+
         let precioUnitarioEur = precioUnitarioOriginal;
         if (linea.moneda_original && linea.moneda_original.toUpperCase() !== 'EUR' && valorConversion !== 1) {
             precioUnitarioEur = precioUnitarioOriginal * valorConversion;
         } else if (valorConversion !== 1 && (!linea.moneda_original || linea.moneda_original.toUpperCase() === 'EUR')) {
-            // Si hay valor de conversión pero la moneda es EUR o no se especifica, asumimos que el precio ya está en EUR y no aplicamos conversión.
-            // O podrías lanzar un error si esto es una inconsistencia.
-            // Para simplificar, si es EUR, no se convierte. Si no hay moneda, y hay VC, se asume que es foreign.
-             // Si no se define moneda_original pero hay valor de conversión, asumimos que el precio está en la moneda extranjera
-            if (!linea.moneda_original) {
+             if (!linea.moneda_original) {
                  precioUnitarioEur = precioUnitarioOriginal * valorConversion;
             }
         }
 
-
         const precioTotalBaseLineaEur = cantidad * precioUnitarioEur;
-        costeTotalPedidoSinGastosEnMonedaOriginal += precioTotalBaseLineaEur; // Acumulamos en EUR
+        costeTotalPedidoSinGastosEnMonedaOriginal += precioTotalBaseLineaEur;
         return { ...linea, precio_total_euro_base: precioTotalBaseLineaEur, precio_unitario_eur: precioUnitarioEur };
     });
 
-    let totalGastosPedidoEur = 0;
+    let totalGastosRepercutibles = 0;
     gastosItems.forEach(gasto => {
-        // Asumimos que gasto.coste_eur ya está en EUR.
-        totalGastosPedidoEur += (parseFloat(gasto.coste_eur) || 0);
+        // Solo incluir gastos SUPLIDOS que NO contengan la palabra "IVA" en la descripción
+        if (gasto.tipo_gasto && gasto.tipo_gasto.toUpperCase() === 'SUPLIDOS' &&
+            gasto.descripcion && !gasto.descripcion.toUpperCase().includes('IVA')) {
+            totalGastosRepercutibles += (parseFloat(gasto.coste_eur) || 0);
+        }
     });
 
-    const porcentajeGastos = costeTotalPedidoSinGastosEnMonedaOriginal > 0 
-        ? totalGastosPedidoEur / costeTotalPedidoSinGastosEnMonedaOriginal
+    const porcentajeGastosRepercutibles = costeTotalPedidoSinGastosEnMonedaOriginal > 0
+        ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnMonedaOriginal
         : 0;
 
     return lineasConPrecioBase.map(linea => {
-        const gastosAsignadosLinea = linea.precio_total_euro_base * porcentajeGastos;
-        const precioTotalConGastosLinea = linea.precio_total_euro_base + gastosAsignadosLinea;
-        const costeUnitarioFinalCalculado = linea.cantidad_original > 0
-            ? precioTotalConGastosLinea / linea.cantidad_original
-            : 0;
+        // Precio por metro lineal en euros (precio_unitario_eur)
+        // (precio metro lineal en dolares * valor de conversion) + 1*(1+porcentaje de gasto repercutible)
+        // La fórmula se aplica al coste unitario ya convertido a EUR, no al total de la línea.
+        // Asumiendo que 'precio_unitario_eur' ya es el precio por metro lineal en EUR
+        const costeUnitarioFinalCalculado = linea.precio_unitario_eur * (1 + porcentajeGastosRepercutibles);
+
         return { ...linea, coste_unitario_final_calculado: costeUnitarioFinalCalculado };
     });
 }
 
 
-// --- ENDPOINT PARA NUEVOS PEDIDOS NACIONALES (GOMA, PVC, FIELTRO) ---
 app.post('/api/pedidos-nacionales', async (req, res) => {
-    const { pedido, lineas, gastos, material_tipo } = req.body; // material_tipo: GOMA, PVC, FIELTRO
+    const { pedido, lineas, gastos, material_tipo } = req.body;
 
     console.log(`Node.js: POST /api/pedidos-nacionales, Material: ${material_tipo}`);
 
@@ -369,10 +442,9 @@ app.post('/api/pedidos-nacionales', async (req, res) => {
     if (!Array.isArray(lineas) || lineas.length === 0) {
         return res.status(400).json({ error: "Debe haber al menos una línea de pedido." });
     }
-    // Aquí más validaciones específicas...
 
     try {
-        const lineasConCostes = calcularCostesLinea(lineas, gastos); // Para nacional, valorConversion es 1 (implícito)
+        const lineasConCostes = calcularCostesLinea(lineas, gastos);
 
         const datosParaDB = {
             pedido: { ...pedido, origen_tipo: 'NACIONAL' },
@@ -382,7 +454,7 @@ app.post('/api/pedidos-nacionales', async (req, res) => {
         };
 
         const resultado = await procesarNuevoPedido(datosParaDB);
-        
+
         console.log(`Node.js: Pedido NACIONAL de ${material_tipo} creado con ID: ${resultado.pedidoId}`);
         res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
 
@@ -395,7 +467,6 @@ app.post('/api/pedidos-nacionales', async (req, res) => {
     }
 });
 
-// --- ENDPOINT PARA NUEVOS PEDIDOS DE IMPORTACIÓN (CONTENEDORES) ---
 app.post('/api/pedidos-importacion', async (req, res) => {
     const { pedido, lineas, gastos, material_tipo, valor_conversion } = req.body;
 
@@ -414,27 +485,23 @@ app.post('/api/pedidos-importacion', async (req, res) => {
     if (!Array.isArray(lineas) || lineas.length === 0) {
         return res.status(400).json({ error: "Debe haber al menos una línea de pedido." });
     }
-    // Validar estructura de gastos de importación (SUPLIDOS, EXENTO, SUJETO)
     const tiposGastoImportacionValidos = ['SUPLIDOS', 'EXENTO', 'SUJETO'];
     if (gastos.some(g => !tiposGastoImportacionValidos.includes(g.tipo_gasto?.toUpperCase()))) {
         return res.status(400).json({ error: `Tipos de gasto para importación deben ser ${tiposGastoImportacionValidos.join(', ')}`});
     }
-    // Aquí más validaciones...
 
     try {
-        // La moneda_original de las líneas puede ser USD, y valor_conversion es la tasa USD a EUR.
-        // calcularCostesLinea se encargará de la conversión si moneda_original no es EUR.
         const lineasConCostes = calcularCostesLinea(lineas, gastos, vc);
 
         const datosParaDB = {
             pedido: { ...pedido, origen_tipo: 'CONTENEDOR', valor_conversion: vc },
             lineas: lineasConCostes,
-            gastos: gastos.map(g => ({...g, tipo_gasto: g.tipo_gasto.toUpperCase()})), // Asegurar mayúsculas
+            gastos: gastos.map(g => ({...g, tipo_gasto: g.tipo_gasto.toUpperCase()})),
             material_tipo_general: material_tipo.toUpperCase()
         };
-        
+
         const resultado = await procesarNuevoPedido(datosParaDB);
-        
+
         console.log(`Node.js: Pedido de IMPORTACIÓN de ${material_tipo} creado con ID: ${resultado.pedidoId}`);
         res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
 
@@ -449,7 +516,7 @@ app.post('/api/pedidos-importacion', async (req, res) => {
 
 app.patch('/api/stock-items/:stockItemId/estado', async (req, res) => {
     const stockItemId = parseInt(req.params.stockItemId, 10);
-    const { status: nuevoEstado } = req.body; // Esperamos { "status": "NUEVO_ESTADO" }
+    const { status: nuevoEstado } = req.body;
 
     console.log(`Node.js: Se ha solicitado PATCH /api/stock-items/${stockItemId}/estado con nuevo estado: ${nuevoEstado}`);
 
@@ -460,19 +527,13 @@ app.patch('/api/stock-items/:stockItemId/estado', async (req, res) => {
         return res.status(400).json({ error: "Nuevo estado no proporcionado o en formato incorrecto. Se espera { \"status\": \"NUEVO_ESTADO\" }." });
     }
 
-    // Podrías añadir validación aquí para los estados específicos que permite esta acción
-    // por ejemplo, si solo se puede pasar a EMPEZADA o AGOTADO desde aquí.
-    // La función de db_operations ya valida contra todos los estados permitidos en la DB.
-
     try {
-        const cambios = await actualizarEstadoStockItem(stockItemId, nuevoEstado);
-        
-        if (cambios > 0) {
+        const changes = await actualizarEstadoStockItem(stockItemId, nuevoEstado);
+
+        if (changes > 0) {
             console.log(`Node.js: Estado del ítem de stock ID ${stockItemId} actualizado a ${nuevoEstado}.`);
             res.json({ mensaje: `Estado del ítem de stock ID ${stockItemId} actualizado a ${nuevoEstado}.` });
         } else {
-            // Esto no debería ocurrir si actualizarEstadoStockItem ya rechaza si no hay cambios.
-            // Pero es una doble verificación.
             console.log(`Node.js: No se encontró o no se actualizó el ítem de stock ID ${stockItemId}.`);
             res.status(404).json({ error: `No se encontró el ítem de stock con ID ${stockItemId} o no se pudo actualizar.` });
         }
@@ -499,36 +560,30 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
     try {
         const resultado = await eliminarPedidoCompleto(pedidoId);
         console.log(`Node.js: Pedido ID ${pedidoId} procesado para eliminación.`);
-        res.json(resultado); // Devuelve el objeto con el resumen de eliminaciones
+        res.json(resultado);
     } catch (error) {
         console.error(`Error en DELETE /api/pedidos/${pedidoId}:`, error.message);
         if (error.message.includes("no encontrado")) {
             return res.status(404).json({ error: error.message });
         }
-        res.status(500).json({ error: "Error interno del servidor al eliminar el pedido.", detalle: error.message });
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
     }
 });
 
 
-
-// --- ENDPOINT PARA TARIFA DE VENTA (Fase 4.1) ---
-
-
 app.get('/api/tarifa-venta', async (req, res) => {
-    const { tipo_cliente } = req.query; // Ej: 'final', 'fabricante', 'metrajes'
+    const { tipo_tarifa } = req.query; // Cambiado de tipo_cliente a tipo_tarifa
 
-    console.log(`Node.js: Se ha solicitado GET /api/tarifa-venta para tipo_cliente: ${tipo_cliente}`);
+    console.log(`Node.js: Se ha solicitado GET /api/tarifa-venta para tipo_tarifa: ${tipo_tarifa}`);
 
-    if (!tipo_cliente) {
-        return res.status(400).json({ error: "El parámetro 'tipo_cliente' es requerido." });
+    if (!tipo_tarifa) {
+        return res.status(400).json({ error: "El parámetro 'tipo_tarifa' es requerido." });
     }
-    // Normalizar el tipo_cliente a minúsculas para que coincida con las claves de configuración
-    const tipoClienteNormalizado = tipo_cliente.toLowerCase(); 
-    
-    // Validar que el tipo_cliente sea uno de los esperados
-    const tiposClienteValidos = ['final', 'fabricante', 'metrajes'];
-    if (!tiposClienteValidos.includes(tipoClienteNormalizado)) {
-        return res.status(400).json({ error: `Valor de 'tipo_cliente' no válido. Valores permitidos: ${tiposClienteValidos.join(', ')}.` });
+    const tipoTarifaNormalizado = tipo_tarifa.toLowerCase();
+
+    const tiposTarifaValidos = ['final', 'fabricante', 'metrajes']; // Mantener los mismos nombres para las claves de configuración
+    if (!tiposTarifaValidos.includes(tipoTarifaNormalizado)) {
+        return res.status(400).json({ error: `Valor de 'tipo_tarifa' no válido. Valores permitidos: ${tiposTarifaValidos.join(', ')}.` });
     }
 
     try {
@@ -547,13 +602,15 @@ app.get('/api/tarifa-venta', async (req, res) => {
             const material = (item.material_tipo || 'DESCONOCIDO').toUpperCase();
             const subtipo = item.subtipo_material || 'N/A';
             const espesor = item.espesor || 'N/A';
-            const claveGrupo = `${material}-${subtipo}-${espesor}`;
-            
+            const ancho = item.ancho || 'N/A'; // Incluir ancho
+            const claveGrupo = `${material}-${subtipo}-${espesor}-${ancho}`; // Clave de grupo más completa
+
             if (!gruposDeStock[claveGrupo]) {
                 gruposDeStock[claveGrupo] = {
                     material_tipo: material,
                     subtipo_material: subtipo,
                     espesor: espesor,
+                    ancho: ancho, // Añadir ancho al grupo
                     items: []
                 };
             }
@@ -569,26 +626,21 @@ app.get('/api/tarifa-venta', async (req, res) => {
                     maxCost = item.coste_unitario_final;
                 }
             });
-            
-            // --- SECCIÓN MODIFICADA PARA SELECCIÓN DE MARGEN ---
-            // Usaremos solo los márgenes por defecto para el tipo de cliente especificado.
-            // Ej: 'margen_default_final', 'margen_default_fabricante', 'margen_default_metrajes'
-            const claveMargenCliente = `margen_default_${tipoClienteNormalizado}`;
-            
+
+            const claveMargenCliente = `margen_default_${tipoTarifaNormalizado}`;
+
             let margenAplicado = configuraciones[claveMargenCliente];
-            
-            // Si no se encuentra un margen específico para ese tipo de cliente, usamos 0 como fallback.
+
             if (margenAplicado === undefined) {
                 console.warn(`Margen no encontrado para la clave '${claveMargenCliente}'. Usando 0.`);
                 margenAplicado = 0;
             }
-            
+
             margenAplicado = parseFloat(margenAplicado);
             if (isNaN(margenAplicado)) {
                 console.warn(`Margen para '${claveMargenCliente}' no es numérico ('${configuraciones[claveMargenCliente]}'). Usando 0.`);
                 margenAplicado = 0;
             }
-            // --- FIN DE SECCIÓN MODIFICADA ---
 
             const precioVenta = maxCost * (1 + margenAplicado);
 
@@ -596,14 +648,14 @@ app.get('/api/tarifa-venta', async (req, res) => {
                 material_tipo: grupo.material_tipo,
                 subtipo_material: grupo.subtipo_material,
                 espesor: grupo.espesor,
-                tipo_cliente_aplicado: tipoClienteNormalizado,
-                coste_maximo_grupo: parseFloat(maxCost.toFixed(4)),
+                ancho: grupo.ancho, // Añadir ancho al resultado
+                precio_metro_lineal_antes_margen: parseFloat(maxCost.toFixed(4)), // Nuevo campo
                 margen_aplicado: parseFloat(margenAplicado.toFixed(4)),
-                precio_venta_calculado: parseFloat(precioVenta.toFixed(4))
+                precio_venta_aplicado_margen: parseFloat(precioVenta.toFixed(4)) // Nuevo campo
             });
         }
-        
-        console.log(`Tarifa de venta generada para tipo_cliente: ${tipoClienteNormalizado}`);
+
+        console.log(`Tarifa de venta generada para tipo_tarifa: ${tipoTarifaNormalizado}`);
         res.json(tarifaVenta);
 
     } catch (error) {
@@ -612,13 +664,519 @@ app.get('/api/tarifa-venta', async (req, res) => {
     }
 });
 
+// --- NUEVOS ENDPOINTS PARA LA FASE 5 ---
 
+// --- ProductosTerminados ---
+app.post('/api/productos-terminados', async (req, res) => {
+    const productoData = req.body;
+    console.log('Node.js: POST /api/productos-terminados', productoData);
+    if (!productoData.referencia || !productoData.nombre) {
+        return res.status(400).json({ error: "Referencia y nombre del producto son requeridos." });
+    }
+    try {
+        const id = await insertarProductoTerminado(productoData);
+        res.status(201).json({ mensaje: "Producto terminado creado con éxito.", id });
+    } catch (error) {
+        console.error("Error en POST /api/productos-terminados:", error.message);
+        if (error.message.includes("ya existe")) {
+            return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/productos-terminados', async (req, res) => {
+    const filtros = req.query;
+    console.log('Node.js: GET /api/productos-terminados', filtros);
+    try {
+        const productos = await consultarProductosTerminados(filtros);
+        res.json(productos);
+    } catch (error) {
+        console.error("Error en GET /api/productos-terminados:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/productos-terminados/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: GET /api/productos-terminados/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de producto no válido." });
+    }
+    try {
+        const producto = await consultarProductoTerminadoPorId(id);
+        if (producto) {
+            res.json(producto);
+        } else {
+            res.status(404).json({ error: "Producto terminado no encontrado." });
+        }
+    } catch (error) {
+        console.error("Error en GET /api/productos-terminados/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.put('/api/productos-terminados/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updates = req.body;
+    console.log('Node.js: PUT /api/productos-terminados/:id', id, updates);
+    if (isNaN(id) || Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "ID de producto no válido o no se proporcionaron datos para actualizar." });
+    }
+    try {
+        const changes = await actualizarProductoTerminado(id, updates);
+        if (changes > 0) {
+            res.json({ mensaje: `Producto terminado ID ${id} actualizado con éxito.` });
+        } else {
+            res.status(404).json({ error: "Producto terminado no encontrado para actualizar." });
+        }
+    } catch (error) {
+        console.error("Error en PUT /api/productos-terminados/:id:", error.message);
+        if (error.message.includes("ya existe")) {
+            return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.delete('/api/productos-terminados/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: DELETE /api/productos-terminados/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de producto no válido." });
+    }
+    try {
+        const changes = await eliminarProductoTerminado(id);
+        if (changes > 0) {
+            res.json({ mensaje: `Producto terminado ID ${id} eliminado con éxito.` });
+        } else {
+            res.status(404).json({ error: "Producto terminado no encontrado para eliminar." });
+        }
+    } catch (error) {
+        console.error("Error en DELETE /api/productos-terminados/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+// --- Maquinaria ---
+app.post('/api/maquinaria', async (req, res) => {
+    const maquinaData = req.body;
+    console.log('Node.js: POST /api/maquinaria', maquinaData);
+    if (!maquinaData.nombre) {
+        return res.status(400).json({ error: "El nombre de la máquina es requerido." });
+    }
+    try {
+        const id = await insertarMaquinaria(maquinaData);
+        res.status(201).json({ mensaje: "Máquina creada con éxito.", id });
+    } catch (error) {
+        console.error("Error en POST /api/maquinaria:", error.message);
+        if (error.message.includes("ya existe")) {
+            return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/maquinaria', async (req, res) => {
+    const filtros = req.query;
+    console.log('Node.js: GET /api/maquinaria', filtros);
+    try {
+        const maquinaria = await consultarMaquinaria(filtros);
+        res.json(maquinaria);
+    } catch (error) {
+        console.error("Error en GET /api/maquinaria:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/maquinaria/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: GET /api/maquinaria/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de máquina no válido." });
+    }
+    try {
+        const maquina = await consultarMaquinariaPorId(id);
+        if (maquina) {
+            res.json(maquina);
+        } else {
+            res.status(404).json({ error: "Máquina no encontrada." });
+        }
+    } catch (error) {
+        console.error("Error en GET /api/maquinaria/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.put('/api/maquinaria/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updates = req.body;
+    console.log('Node.js: PUT /api/maquinaria/:id', id, updates);
+    if (isNaN(id) || Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "ID de máquina no válido o no se proporcionaron datos para actualizar." });
+    }
+    try {
+        const changes = await actualizarMaquinaria(id, updates);
+        if (changes > 0) {
+            res.json({ mensaje: `Máquina ID ${id} actualizada con éxito.` });
+        } else {
+            res.status(404).json({ error: "Máquina no encontrada para actualizar." });
+        }
+    } catch (error) {
+        console.error("Error en PUT /api/maquinaria/:id:", error.message);
+        if (error.message.includes("ya existe")) {
+            return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.delete('/api/maquinaria/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: DELETE /api/maquinaria/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de máquina no válido." });
+    }
+    try {
+        const changes = await eliminarMaquinaria(id);
+        if (changes > 0) {
+            res.json({ mensaje: `Máquina ID ${id} eliminada con éxito.` });
+        } else {
+            res.status(404).json({ error: "Máquina no encontrada para eliminar." });
+        }
+    } catch (error) {
+        console.error("Error en DELETE /api/maquinaria/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+// --- Recetas ---
+app.post('/api/recetas', async (req, res) => {
+    const recetaData = req.body;
+    console.log('Node.js: POST /api/recetas', recetaData);
+    if (!recetaData.producto_terminado_id || (!recetaData.material_id && !recetaData.componente_id)) {
+        return res.status(400).json({ error: "Datos de receta incompletos: ID de producto y un material/componente son requeridos." });
+    }
+    try {
+        const id = await insertarReceta(recetaData);
+        // Recalcular coste de fabricación del producto terminado al añadir/actualizar receta
+        await actualizarCosteFabricacionEstandar(recetaData.producto_terminado_id);
+        res.status(201).json({ mensaje: "Receta creada con éxito.", id });
+    } catch (error) {
+        console.error("Error en POST /api/recetas:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/recetas', async (req, res) => {
+    const filtros = req.query;
+    console.log('Node.js: GET /api/recetas', filtros);
+    try {
+        const recetas = await consultarRecetas(filtros);
+        res.json(recetas);
+    } catch (error) {
+        console.error("Error en GET /api/recetas:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/recetas/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: GET /api/recetas/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de receta no válido." });
+    }
+    try {
+        const receta = await consultarRecetaPorId(id);
+        if (receta) {
+            res.json(receta);
+        } else {
+            res.status(404).json({ error: "Receta no encontrada." });
+        }
+    } catch (error) {
+        console.error("Error en GET /api/recetas/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.put('/api/recetas/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updates = req.body;
+    console.log('Node.js: PUT /api/recetas/:id', id, updates);
+    if (isNaN(id) || Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "ID de receta no válido o no se proporcionaron datos para actualizar." });
+    }
+    try {
+        const changes = await actualizarReceta(id, updates);
+        // Recalcular coste de fabricación del producto terminado
+        if (updates.producto_terminado_id) { // Asegurarse de que el ID del producto esté presente
+            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id);
+        } else if (changes > 0) { // Si se actualizó y no se cambió el producto, buscar el producto original
+            const recetaOriginal = await consultarRecetaPorId(id);
+            if (recetaOriginal && recetaOriginal.producto_terminado_id) {
+                await actualizarCosteFabricacionEstandar(recetaOriginal.producto_terminado_id);
+            }
+        }
+        res.json({ mensaje: `Receta ID ${id} actualizada con éxito.` });
+    } catch (error) {
+        console.error("Error en PUT /api/recetas/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.delete('/api/recetas/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: DELETE /api/recetas/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de receta no válido." });
+    }
+    try {
+        const receta = await consultarRecetaPorId(id); // Obtener la receta antes de borrar para recalcular
+        const changes = await eliminarReceta(id);
+        if (changes > 0) {
+            if (receta && receta.producto_terminado_id) {
+                await actualizarCosteFabricacionEstandar(receta.producto_terminado_id); // Recalcular
+            }
+            res.json({ mensaje: `Receta ID ${id} eliminada con éxito.` });
+        } else {
+            res.status(404).json({ error: "Receta no encontrada para eliminar." });
+        }
+    } catch (error) {
+        console.error("Error en DELETE /api/recetas/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+// --- ProcesosFabricacion ---
+app.post('/api/procesos-fabricacion', async (req, res) => {
+    const procesoData = req.body;
+    console.log('Node.js: POST /api/procesos-fabricacion', procesoData);
+    if (!procesoData.producto_terminado_id || !procesoData.maquinaria_id || !procesoData.nombre_proceso || !procesoData.tiempo_estimado_horas) {
+        return res.status(400).json({ error: "Datos de proceso incompletos." });
+    }
+    try {
+        const id = await insertarProcesoFabricacion(procesoData);
+        // Recalcular coste de fabricación del producto terminado
+        await actualizarCosteFabricacionEstandar(procesoData.producto_terminado_id);
+        res.status(201).json({ mensaje: "Proceso de fabricación creado con éxito.", id });
+    } catch (error) {
+        console.error("Error en POST /api/procesos-fabricacion:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/procesos-fabricacion', async (req, res) => {
+    const filtros = req.query;
+    console.log('Node.js: GET /api/procesos-fabricacion', filtros);
+    try {
+        const procesos = await consultarProcesosFabricacion(filtros);
+        res.json(procesos);
+    } catch (error) {
+        console.error("Error en GET /api/procesos-fabricacion:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/procesos-fabricacion/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: GET /api/procesos-fabricacion/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de proceso no válido." });
+    }
+    try {
+        const proceso = await consultarProcesoFabricacionPorId(id);
+        if (proceso) {
+            res.json(proceso);
+        } else {
+            res.status(404).json({ error: "Proceso de fabricación no encontrado." });
+        }
+    } catch (error) {
+        console.error("Error en GET /api/procesos-fabricacion/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.put('/api/procesos-fabricacion/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updates = req.body;
+    console.log('Node.js: PUT /api/procesos-fabricacion/:id', id, updates);
+    if (isNaN(id) || Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "ID de proceso no válido o no se proporcionaron datos para actualizar." });
+    }
+    try {
+        const changes = await actualizarProcesoFabricacion(id, updates);
+        if (updates.producto_terminado_id) { // Asegurarse de que el ID del producto esté presente
+            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id);
+        } else if (changes > 0) { // Si se actualizó y no se cambió el producto, buscar el producto original
+            const procesoOriginal = await consultarProcesoFabricacionPorId(id);
+            if (procesoOriginal && procesoOriginal.producto_terminado_id) {
+                await actualizarCosteFabricacionEstandar(procesoOriginal.producto_terminado_id);
+            }
+        }
+        res.json({ mensaje: `Proceso de fabricación ID ${id} actualizado con éxito.` });
+    } catch (error) {
+        console.error("Error en PUT /api/procesos-fabricacion/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.delete('/api/procesos-fabricacion/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: DELETE /api/procesos-fabricacion/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de proceso no válido." });
+    }
+    try {
+        const proceso = await consultarProcesoFabricacionPorId(id);
+        const changes = await eliminarProcesoFabricacion(id);
+        if (changes > 0) {
+            if (proceso && proceso.producto_terminado_id) {
+                await actualizarCosteFabricacionEstandar(proceso.producto_terminado_id);
+            }
+            res.json({ mensaje: `Proceso de fabricación ID ${id} eliminado con éxito.` });
+        } else {
+            res.status(404).json({ error: "Proceso de fabricación no encontrado para eliminar." });
+        }
+    } catch (error) {
+        console.error("Error en DELETE /api/procesos-fabricacion/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+// --- OrdenesProduccion ---
+app.post('/api/ordenes-produccion', async (req, res) => {
+    const ordenData = req.body;
+    console.log('Node.js: POST /api/ordenes-produccion', ordenData);
+    if (!ordenData.producto_terminado_id || !ordenData.cantidad_a_producir || !ordenData.fecha) {
+        return res.status(400).json({ error: "ID de producto, cantidad a producir y fecha son requeridos." });
+    }
+    try {
+        const id = await insertarOrdenProduccion(ordenData);
+        res.status(201).json({ mensaje: "Orden de producción creada con éxito.", id });
+    } catch (error) {
+        console.error("Error en POST /api/ordenes-produccion:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/ordenes-produccion', async (req, res) => {
+    const filtros = req.query;
+    console.log('Node.js: GET /api/ordenes-produccion', filtros);
+    try {
+        const ordenes = await consultarOrdenesProduccion(filtros);
+        res.json(ordenes);
+    } catch (error) {
+        console.error("Error en GET /api/ordenes-produccion:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.get('/api/ordenes-produccion/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: GET /api/ordenes-produccion/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de orden de producción no válido." });
+    }
+    try {
+        const orden = await consultarOrdenProduccionPorId(id);
+        if (orden) {
+            res.json(orden);
+        } else {
+            res.status(404).json({ error: "Orden de producción no encontrada." });
+        }
+    } catch (error) {
+        console.error("Error en GET /api/ordenes-produccion/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.put('/api/ordenes-produccion/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const updates = req.body;
+    console.log('Node.js: PUT /api/ordenes-produccion/:id', id, updates);
+    if (isNaN(id) || Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "ID de orden no válido o no se proporcionaron datos para actualizar." });
+    }
+    try {
+        const changes = await actualizarOrdenProduccion(id, updates);
+        res.json({ mensaje: `Orden de producción ID ${id} actualizada con éxito.` });
+    } catch (error) {
+        console.error("Error en PUT /api/ordenes-produccion/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.delete('/api/ordenes-produccion/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: DELETE /api/ordenes-produccion/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de orden de producción no válido." });
+    }
+    try {
+        const changes = await eliminarOrdenProduccion(id);
+        if (changes > 0) {
+            res.json({ mensaje: `Orden de producción ID ${id} eliminada con éxito.` });
+        } else {
+            res.status(404).json({ error: "Orden de producción no encontrada para eliminar." });
+        }
+    } catch (error) {
+        console.error("Error en DELETE /api/ordenes-produccion/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+// --- Endpoint para procesar una orden de producción (consumir materiales, generar producto) ---
+app.post('/api/ordenes-produccion/:id/procesar', async (req, res) => {
+    const ordenId = parseInt(req.params.id, 10);
+    console.log(`Node.js: POST /api/ordenes-produccion/${ordenId}/procesar`);
+    if (isNaN(ordenId)) {
+        return res.status(400).json({ error: "ID de orden de producción no válido." });
+    }
+    try {
+        const resultado = await procesarOrdenProduccion(ordenId);
+        res.status(200).json(resultado);
+    } catch (error) {
+        console.error(`Error procesando orden de producción ID ${ordenId}:`, error.message);
+        res.status(500).json({ error: "Error al procesar la orden de producción.", detalle: error.message });
+    }
+});
+
+// --- StockProductosTerminados (solo lectura y eliminación para gestión simple) ---
+app.get('/api/stock-productos-terminados', async (req, res) => {
+    const filtros = req.query;
+    console.log('Node.js: GET /api/stock-productos-terminados', filtros);
+    try {
+        const stockPT = await consultarStockProductosTerminados(filtros);
+        res.json(stockPT);
+    } catch (error) {
+        console.error("Error en GET /api/stock-productos-terminados:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.delete('/api/stock-productos-terminados/:id', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    console.log('Node.js: DELETE /api/stock-productos-terminados/:id', id);
+    if (isNaN(id)) {
+        return res.status(400).json({ error: "ID de stock de producto terminado no válido." });
+    }
+    try {
+        const changes = await eliminarStockProductoTerminado(id);
+        if (changes > 0) {
+            res.json({ mensaje: `Stock de Producto Terminado ID ${id} eliminado con éxito.` });
+        } else {
+            res.status(404).json({ error: "Stock de Producto Terminado no encontrado para eliminar." });
+        }
+    } catch (error) {
+        console.error("Error en DELETE /api/stock-productos-terminados/:id:", error.message);
+        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
 
 
 app.listen(PORT, () => {
     console.log(`Servidor Node.js API escuchando en http://localhost:${PORT}`);
 });
-
 
 // Cerrar la conexión a la base de datos cuando la aplicación se cierra
 process.on('SIGINT', () => {

@@ -1,25 +1,99 @@
 /* frontend-react/src/App.css */
 
-/* El estilo del body general ahora se controla principalmente desde index.css */
-/* Puedes quitar la regla 'body' de aquí si todo lo maneja index.css, 
-   o dejarla si necesitas especificidad para el contexto de App. */
+/* El estilo del body general se controla principalmente desde index.css */
 
+/* Nuevo layout principal con flexbox para sidebar y contenido */
+.app-layout {
+  display: flex;
+  min-height: 100vh; /* Asegura que ocupe toda la altura de la ventana */
+  background-color: var(--color-fondo-principal); /* Hereda del tema */
+  color: var(--color-texto-principal); /* Hereda del tema */
+}
+
+/* Estilos para la barra lateral (Sidebar) */
+.sidebar {
+  width: 250px; /* Ancho fijo de la barra lateral */
+  background-color: var(--color-verde-primario); /* Un verde principal para el fondo */
+  color: var(--color-texto-sobre-verde); /* Texto blanco */
+  padding: 20px;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1); /* Sombra sutil a la derecha */
+  display: flex;
+  flex-direction: column;
+  gap: 15px; /* Espacio entre secciones */
+  flex-shrink: 0; /* Evita que la sidebar se encoja */
+}
+
+.app-title {
+  text-align: center;
+  color: var(--color-texto-sobre-verde); /* Título de la app en la sidebar */
+  margin-top: 0;
+  margin-bottom: 30px;
+  font-size: 1.6em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3); /* Línea divisoria */
+  padding-bottom: 15px;
+}
+
+.sidebar-section h3 {
+  color: var(--color-verde-claro); /* Títulos de sección en verde claro */
+  font-size: 1.1em;
+  margin-top: 0;
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.2); /* Línea punteada */
+}
+
+.sidebar-section button {
+  display: block; /* Cada botón ocupa su propia línea */
+  width: 100%;
+  padding: 10px 15px;
+  margin-bottom: 8px; /* Espacio entre botones */
+  background-color: transparent; /* Fondo transparente por defecto */
+  color: var(--color-texto-sobre-verde); /* Texto blanco */
+  border: 1px solid rgba(255, 255, 255, 0.2); /* Borde sutil */
+  border-radius: 4px;
+  text-align: left; /* Alinea el texto a la izquierda */
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.sidebar-section button:hover:not(:disabled) {
+  background-color: var(--color-verde-oscuro); /* Verde más oscuro al pasar el ratón */
+  border-color: var(--color-verde-oscuro);
+}
+
+.sidebar-section button:disabled {
+  background-color: var(--color-verde-oscuro); /* Botón seleccionado o deshabilitado */
+  color: var(--color-texto-sobre-verde);
+  border-color: var(--color-verde-oscuro);
+  cursor: default;
+  opacity: 0.9; /* Ligeramente menos opaco */
+}
+
+/* Área principal de contenido */
+.main-content-area {
+  flex-grow: 1; /* Ocupa el espacio restante */
+  padding: 20px;
+  overflow-y: auto; /* Permite scroll si el contenido es muy largo */
+}
+
+/* El .container ahora es solo el contenedor interno de cada vista */
 .container {
   padding: 20px 30px;
   max-width: 1300px;
-  margin: 20px auto;
-  background-color: var(--color-fondo-principal); /* Usamos variable de index.css */
-  color: var(--color-texto-principal); /* Usamos variable de index.css */
+  margin: 0 auto;
+  background-color: var(--color-fondo-principal);
+  color: var(--color-texto-principal);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.08);
 }
 
-/* h1 dentro de App.jsx puede tener su estilo específico */
-.container h1 { /* Aplicado al h1 principal de la app */
+/* Resto de tus estilos existentes en App.css (h1, h2, filtros-container, table, etc.) */
+
+.container h1 { /* Este h1 ya no es el principal de la app, sino el de la vista */
   text-align: center;
-  color: var(--color-verde-oscuro); /* Título principal con verde oscuro */
+  color: var(--color-verde-oscuro);
   margin-bottom: 25px;
-  font-size: 1.9em; /* Ligeramente más grande que el h2 */
+  font-size: 1.9em;
 }
 
 .container h2 { /* Para subtítulos como "Stock Actual" */
@@ -37,8 +111,8 @@
   gap: 15px 20px;
   margin-bottom: 25px;
   padding: 15px;
-  background-color: #f9f9f9; /* Un fondo claro para los filtros */
-  border: 1px solid #e0e6ed;
+  background-color: var(--color-verde-muy-claro); /* Fondo verde muy claro para filtros */
+  border: 1px solid var(--color-verde-claro); /* Borde verde claro */
   border-radius: 6px;
 }
 
@@ -49,16 +123,16 @@
 }
 
 .filtro-item label {
-  font-weight: 500; /* Un poco menos grueso que antes */
+  font-weight: 500;
   font-size: 0.9em;
-  color: #455a64; /* Un gris azulado oscuro para labels */
+  color: var(--color-texto-oscuro-neutro); /* Texto oscuro para labels */
 }
 
 .filtro-item select,
 .filtro-item input[type="text"] {
   padding: 9px 12px;
-  border-radius: 4px; /* Bordes un poco menos redondeados */
-  border: 1px solid #B0BEC5; /* Un borde gris más suave */
+  border-radius: 4px;
+  border: 1px solid var(--color-borde-neutro); /* Borde neutro */
   min-width: 180px;
   font-size: 0.9em;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -66,8 +140,8 @@
 
 .filtro-item select:focus,
 .filtro-item input[type="text"]:focus {
-  border-color: var(--color-verde-primario); /* Foco verde */
-  box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25); /* Sombra de foco verde, usando el color primario */
+  border-color: var(--color-verde-primario);
+  box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25);
   outline: none;
 }
 
@@ -77,27 +151,27 @@
 
 table {
   width: 100%;
-  border-collapse: separate; 
+  border-collapse: separate;
   border-spacing: 0;
   margin-top: 20px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Sombra más sutil */
-  border-radius: 6px; 
-  overflow: hidden; 
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08); /* Sombra más sutil */
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 th, td {
-  border-bottom: 1px solid #e0e6ed; 
-  padding: 10px 15px; /* Un poco menos de padding */
+  border-bottom: 1px solid var(--color-borde-neutro); /* Borde neutro */
+  padding: 10px 15px;
   text-align: left;
-  font-size: 0.88em; /* Ligeramente más pequeño para más datos */
+  font-size: 0.88em;
 }
 
 th {
-  background-color: var(--color-verde-primario); /* Cabecera con verde primario */
-  color: var(--color-texto-sobre-verde); /* Texto blanco sobre verde */
-  font-weight: 600; 
+  background-color: var(--color-verde-primario);
+  color: var(--color-texto-sobre-verde);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em; /* Espaciado de letras sutil */
+  letter-spacing: 0.05em;
   font-size: 0.8em;
 }
 
@@ -106,15 +180,15 @@ tr:last-child td {
 }
 
 tbody tr:nth-child(even) {
-  background-color: #f8f9fa; /* Un gris muy claro para filas pares */
+  background-color: var(--color-verde-muy-claro); /* Fondo verde muy claro para filas pares */
 }
 
 tbody tr:hover {
-  background-color: var(--color-verde-claro); /* Hover con verde claro */
-  transition: background-color 0.15s ease-in-out; /* Añadido de index.css si no lo tenías aquí */
+  background-color: var(--color-verde-claro);
+  transition: background-color 0.15s ease-in-out;
 }
 
-.error-backend, .success-message { /* Estilo común para mensajes */
+.error-backend, .success-message {
   margin: 20px 0;
   padding: 15px;
   border-radius: 4px;
@@ -122,19 +196,17 @@ tbody tr:hover {
   border: 1px solid transparent;
 }
 
-.error-backend { 
-  background-color: #f8d7da;
-  border-color: #f5c6cb;
-  color: #721c24;
+.error-backend {
+  background-color: var(--color-error-fondo);
+  border-color: var(--color-error-borde);
+  color: var(--color-error-texto);
 }
-/* El .success-message se podría definir en el CSS del formulario si solo se usa allí,
-   o aquí si es general para App.css. Si lo tienes en el CSS del formulario, está bien. */
-.success-message { 
+
+.success-message {
   background-color: var(--color-verde-claro);
   border-color: var(--color-verde-oscuro);
   color: var(--color-verde-oscuro);
 }
-
 
 p {
   line-height: 1.6;
@@ -147,7 +219,7 @@ p {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(202, 192, 192, 0.5); /* Un poco menos oscuro */
+  background-color: rgba(202, 192, 192, 0.5); /* Fondo semitransparente gris claro */
   display: flex;
   justify-content: center;
   align-items: center;
@@ -157,20 +229,20 @@ p {
 .modal-content {
   background-color: var(--color-fondo-principal);
   color: var(--color-texto-principal);
-  padding: 20px 25px; /* Ajuste de padding */
+  padding: 20px 25px;
   border-radius: 6px;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.3); /* Sombra más pronunciada */
+  box-shadow: 0 5px 15px rgba(0,0,0,0.15); /* Sombra más clara */
   width: 90%;
-  max-width: 650px; 
-  max-height: 85vh; 
-  overflow-y: auto; 
+  max-width: 650px;
+  max-height: 85vh;
+  overflow-y: auto;
   position: relative;
 }
 
 .modal-content h2 {
   margin-top: 0;
-  color: var(--color-verde-primario); /* Título del modal en verde */
-  border-bottom: 1px solid #eee;
+  color: var(--color-verde-primario);
+  border-bottom: 1px solid var(--color-borde-neutro); /* Borde neutro */
   padding-bottom: 10px;
   margin-bottom: 20px;
   font-size: 1.3em;
@@ -178,18 +250,18 @@ p {
 
 .modal-details-grid {
   display: grid;
-  grid-template-columns: auto 1fr; 
-  gap: 7px 15px; 
-  font-size: 0.9em; /* Un poco más pequeño para más info */
+  grid-template-columns: auto 1fr;
+  gap: 7px 15px;
+  font-size: 0.9em;
 }
 
 .modal-details-grid p {
   margin: 0;
-  padding: 3px 0; /* Menos padding vertical */
+  padding: 3px 0;
 }
 
 .modal-details-grid p strong {
-  color: var(--color-texto-principal); /* Asegurar contraste */
+  color: var(--color-texto-principal);
   margin-right: 8px;
 }
 
@@ -197,7 +269,7 @@ p {
   display: block;
   margin: 25px auto 0;
   padding: 10px 20px;
-  background-color: #6c757d; /* Botón de cerrar gris (o puedes usar un verde suave) */
+  background-color: #6c757d; /* Gris para cerrar, puedes cambiarlo a un verde suave si prefieres */
   color: white;
   border: none;
   border-radius: 4px;
@@ -212,7 +284,7 @@ p {
 
 /* Botón "Ver Detalles" en la tabla */
 .details-button {
-  padding: 5px 10px; /* Un poco más pequeño */
+  padding: 5px 10px;
   font-size: 0.8em;
   background-color: var(--color-verde-primario);
   color: var(--color-texto-sobre-verde);
@@ -226,45 +298,7 @@ p {
   background-color: var(--color-verde-oscuro);
 }
 
-/* Estilos para la navegación de App.jsx */
-.app-nav {
-  margin-bottom: 25px; /* Más margen inferior */
-  padding-bottom: 15px;
-  border-bottom: 1px solid var(--color-verde-claro); /* Borde con verde claro */
-  display: flex;
-  gap: 10px; /* Espacio entre botones */
-}
-
-
-
-.app-nav button:disabled {
-  background-color: var(--color-verde-primario);
-  color: var(--color-texto-sobre-verde);
-  border-color: var(--color-verde-primario); /* Asegura que el borde también sea verde */
-  cursor: default;
-  opacity: 0.85; /* Para que se vea ligeramente diferente al hover activo */
-}
-.app-nav button:hover:not(:disabled) { /* Reutilizando el estilo hover de index.css si es el mismo */
-   border-color: var(--color-boton-borde-hover); /* Heredado de index.css */
-   /* Si quieres un hover específico para la nav:
-   background-color: var(--color-verde-oscuro);
-   color: var(--color-texto-sobre-verde);
-   border-color: var(--color-verde-oscuro);
-   */
-}
-
-.vista-contenido {
-  margin-top: 20px;
-}
-
-/* Si tenías estilos para .expand-button, .sub-table-row, .sub-table, .details-button-small 
-   y ya no usas la tabla agrupada expandible, puedes eliminarlos para limpiar el CSS.
-   Los he quitado de esta versión para que coincida con el App.jsx de lista plana.
-*/
-
-/* frontend-react/src/App.css */
-/* ... (tus estilos existentes) ... */
-
+/* Estilos para los botones de acción en tablas */
 .action-button {
   padding: 4px 8px;
   font-size: 0.8em;
@@ -272,8 +306,8 @@ p {
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  margin-right: 5px; /* Espacio entre botones si hay más de uno */
-  min-width: 70px; /* Ancho mínimo para consistencia */
+  margin-right: 5px;
+  min-width: 70px;
   text-align: center;
 }
 
@@ -291,11 +325,57 @@ p {
   background-color: #c9302c;
 }
 
-/* Ajustes en la tabla de stock para dar espacio a los nuevos botones */
-/* Puedes ajustar las cabeceras si algunas columnas se ven muy apretadas */
-/* Ejemplo: Reducir el padding un poco más en las celdas de la tabla de stock */
-/*
-table th, table td {
-  padding: 8px 10px; 
+/* Ajustes para el tema oscuro (ahora con fondos claros) */
+@media (prefers-color-scheme: dark) {
+  .sidebar {
+    background-color: var(--color-verde-primario); /* Sidebar verde primario (claro) */
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1); /* Sombra sutil */
+  }
+  .sidebar-section button {
+    border: 1px solid rgba(0, 0, 0, 0.1); /* Borde más claro para botones de sidebar */
+    color: var(--color-texto-oscuro-neutro); /* Texto oscuro para botones de sidebar en fondo claro */
+  }
+  .sidebar-section button:hover:not(:disabled) {
+    background-color: var(--color-verde-claro); /* Hover más claro para sidebar */
+  }
+  .sidebar-section button:disabled {
+    background-color: var(--color-verde-claro); /* Fondo claro para botón deshabilitado */
+    color: var(--color-texto-oscuro-neutro); /* Texto oscuro para botón deshabilitado */
+  }
+  .sidebar-section h3 {
+    color: var(--color-texto-oscuro-neutro); /* Títulos de sidebar en texto oscuro */
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.2);
+  }
+  .container {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08); /* Sombra más clara */
+  }
+  .filtros-container {
+    background-color: var(--color-verde-muy-claro); /* Fondo verde muy claro para filtros */
+    border: 1px solid var(--color-verde-claro); /* Borde verde claro */
+  }
+  .filtros-container input[type="text"],
+  .filtros-container select {
+    background-color: var(--color-input-fondo-claro); /* Fondo blanco para inputs de filtro */
+    color: var(--color-input-texto-claro); /* Texto oscuro para inputs de filtro */
+    border: 1px solid var(--color-input-borde-claro); /* Borde claro para inputs de filtro */
+  }
+  .filtros-container input[type="text"]:focus,
+  .filtros-container select:focus {
+    box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25); /* Sombra de foco verde */
+  }
+  table {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); /* Sombra más clara */
+  }
+  th, td {
+    border-bottom: 1px solid var(--color-borde-neutro); /* Borde neutro */
+  }
+  tbody tr:nth-child(even) {
+    background-color: var(--color-verde-muy-claro); /* Fondo verde muy claro para filas pares */
+  }
+  tbody tr:hover {
+    background-color: var(--color-verde-claro); /* Hover claro */
+  }
+  .modal-content {
+    box-shadow: 0 5px 15px rgba(0,0,0,0.15); /* Sombra más clara */
+  }
 }
-*/

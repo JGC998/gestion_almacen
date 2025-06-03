@@ -6,24 +6,25 @@ function TarifaVenta() {
   const [tarifaData, setTarifaData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedTipoCliente, setSelectedTipoCliente] = useState(''); // 'final', 'fabricante', 'metrajes'
+  const [selectedTipoTarifa, setSelectedTipoTarifa] = useState(''); // Cambiado a tipo_tarifa
 
-  const tiposCliente = [
-    { value: '', label: 'Seleccione un tipo de cliente...' },
-    { value: 'final', label: 'Cliente Final' },
-    { value: 'fabricante', label: 'Fabricante' },
-    { value: 'metrajes', label: 'Venta por Metrajes' },
+  const tiposTarifa = [ // Cambiado a tipos de tarifa
+    { value: '', label: 'Seleccione un tipo de tarifa...' },
+    { value: 'final', label: 'Tarifa Cliente Final' },
+    { value: 'fabricante', label: 'Tarifa Fabricante' },
+    { value: 'metrajes', label: 'Tarifa Venta por Metrajes' },
   ];
 
   const fetchTarifaVenta = useCallback(async () => {
-    if (!selectedTipoCliente) {
-      setTarifaData([]); // Limpiar datos si no hay tipo de cliente seleccionado
+    if (!selectedTipoTarifa) {
+      setTarifaData([]); // Limpiar datos si no hay tipo de tarifa seleccionado
       return;
     }
 
     setLoading(true);
     setError(null);
-    const apiUrl = `http://localhost:5002/api/tarifa-venta?tipo_cliente=${selectedTipoCliente}`;
+    // Cambiado el query param a tipo_tarifa
+    const apiUrl = `http://localhost:5002/api/tarifa-venta?tipo_tarifa=${selectedTipoTarifa}`;
     console.log("Llamando a API para tarifa de venta:", apiUrl);
 
     try {
@@ -35,22 +36,22 @@ function TarifaVenta() {
       const data = await response.json();
       setTarifaData(data);
     } catch (err) {
-      console.error(`Error al obtener tarifa de venta para ${selectedTipoCliente}:`, err);
+      console.error(`Error al obtener tarifa de venta para ${selectedTipoTarifa}:`, err);
       setError(err.message);
       setTarifaData([]);
     } finally {
       setLoading(false);
     }
-  }, [selectedTipoCliente]);
+  }, [selectedTipoTarifa]);
 
-  // Cargar la tarifa cuando se selecciona un tipo de cliente válido
+  // Cargar la tarifa cuando se selecciona un tipo de tarifa válido
   useEffect(() => {
-    if (selectedTipoCliente) {
+    if (selectedTipoTarifa) {
       fetchTarifaVenta();
     } else {
       setTarifaData([]); // Limpiar si se deselecciona
     }
-  }, [selectedTipoCliente, fetchTarifaVenta]);
+  }, [selectedTipoTarifa, fetchTarifaVenta]);
 
   return (
     <div className="tarifa-venta-container">
@@ -58,31 +59,27 @@ function TarifaVenta() {
 
       <div className="filtros-container" style={{ maxWidth: '400px', marginBottom: '20px' }}>
         <div className="filtro-item">
-          <label htmlFor="tipoClienteTarifa">Seleccionar Tipo de Cliente:</label>
-          <select 
-            id="tipoClienteTarifa" 
-            value={selectedTipoCliente} 
-            onChange={(e) => setSelectedTipoCliente(e.target.value)}
+          <label htmlFor="tipoTarifa">Seleccionar Tipo de Tarifa:</label> {/* Cambiado el label */}
+          <select
+            id="tipoTarifa"
+            value={selectedTipoTarifa}
+            onChange={(e) => setSelectedTipoTarifa(e.target.value)}
           >
-            {tiposCliente.map(tc => (
-              <option key={tc.value} value={tc.value}>{tc.label}</option>
+            {tiposTarifa.map(tt => (
+              <option key={tt.value} value={tt.value}>{tt.label}</option>
             ))}
           </select>
         </div>
-        {/* Podríamos añadir un botón explícito de "Generar Tarifa" si no queremos que se cargue automáticamente al cambiar el select */}
-        {/* <button onClick={fetchTarifaVenta} disabled={!selectedTipoCliente || loading}>
-          {loading ? 'Generando...' : 'Generar Tarifa'}
-        </button> */}
       </div>
 
       {loading && <p>Generando tarifa...</p>}
       {error && <p className="error-backend">Error al generar tarifa: {error}</p>}
-      
-      {!loading && !error && selectedTipoCliente && tarifaData.length === 0 && (
-        <p>No hay datos de tarifa para mostrar para el tipo de cliente seleccionado (o no hay stock base para calcularla).</p>
+
+      {!loading && !error && selectedTipoTarifa && tarifaData.length === 0 && (
+        <p>No hay datos de tarifa para mostrar para el tipo de tarifa seleccionado (o no hay stock base para calcularla).</p>
       )}
-      {!loading && !error && !selectedTipoCliente && (
-        <p>Por favor, seleccione un tipo de cliente para ver la tarifa.</p>
+      {!loading && !error && !selectedTipoTarifa && (
+        <p>Por favor, seleccione un tipo de tarifa para verla.</p>
       )}
 
       {!loading && !error && tarifaData.length > 0 && (
@@ -92,20 +89,22 @@ function TarifaVenta() {
               <th>Material</th>
               <th>Subtipo</th>
               <th>Espesor</th>
-              <th>Coste Máx. (€)</th>
+              <th>Ancho (mm)</th> {/* Nuevo campo */}
+              <th>Precio ML antes margen (€)</th> {/* Nuevo campo */}
               <th>Margen (%)</th>
-              <th>Precio Venta (€)</th>
+              <th>Precio Venta aplicado margen (€)</th> {/* Nuevo campo */}
             </tr>
           </thead>
           <tbody>
             {tarifaData.map((item, index) => (
-              <tr key={`${item.material_tipo}-${item.subtipo_material}-${item.espesor}-${index}`}> {/* Clave más robusta */}
+              <tr key={`${item.material_tipo}-${item.subtipo_material}-${item.espesor}-${item.ancho}-${index}`}> {/* Clave más robusta */}
                 <td>{item.material_tipo}</td>
                 <td>{item.subtipo_material}</td>
                 <td>{item.espesor}</td>
-                <td>{item.coste_maximo_grupo.toFixed(4)}</td>
+                <td>{item.ancho !== null && item.ancho !== undefined ? parseFloat(item.ancho).toFixed(0) : '-'}</td> {/* Mostrar ancho */}
+                <td>{item.precio_metro_lineal_antes_margen.toFixed(4)}</td> {/* Mostrar nuevo campo */}
                 <td>{(item.margen_aplicado * 100).toFixed(2)}%</td>
-                <td>{item.precio_venta_calculado.toFixed(2)}</td> {/* Precio de venta usualmente con 2 decimales */}
+                <td>{item.precio_venta_aplicado_margen.toFixed(2)}</td> {/* Mostrar nuevo campo */}
               </tr>
             ))}
           </tbody>

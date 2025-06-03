@@ -1,3 +1,4 @@
+// frontend-react/src/components/DetallePedidoModal.jsx
 import { useState, useEffect, useCallback } from 'react';
 
 function DetallePedidoModal({ pedidoId, onClose }) {
@@ -60,7 +61,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
   // .modal-backdrop y .modal-content
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '800px'}}> {/* Un poco más ancho */}
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '800px'}}>
         {loading && <p>Cargando detalles del pedido...</p>}
         {error && <p className="error-backend">Error al cargar detalles: {error}</p>}
         
@@ -70,7 +71,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
             
             <div className="detalle-pedido-seccion">
               <h3>Información del Pedido</h3>
-              <div className="modal-details-grid"> {/* Reutilizando clase de App.css */}
+              <div className="modal-details-grid">
                 <p><strong>Nº Factura:</strong> {detallePedido.pedidoInfo.numero_factura}</p>
                 <p><strong>Proveedor:</strong> {detallePedido.pedidoInfo.proveedor || '-'}</p>
                 <p><strong>Fecha Pedido:</strong> {formatDate(detallePedido.pedidoInfo.fecha_pedido)}</p>
@@ -79,6 +80,10 @@ function DetallePedidoModal({ pedidoId, onClose }) {
                 {detallePedido.pedidoInfo.origen_tipo === 'CONTENEDOR' && (
                   <p><strong>Valor Conversión:</strong> {detallePedido.pedidoInfo.valor_conversion}</p>
                 )}
+                {/* Añadimos el porcentaje de gastos aquí */}
+                {detallePedido.porcentajeGastos !== undefined && (
+                  <p><strong>% Gastos sobre Material:</strong> {(detallePedido.porcentajeGastos * 100).toFixed(2)}%</p>
+                )}
                 <p><strong>Observaciones:</strong> {detallePedido.pedidoInfo.observaciones || '-'}</p>
               </div>
             </div>
@@ -86,7 +91,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
             {detallePedido.gastos && detallePedido.gastos.length > 0 && (
               <div className="detalle-pedido-seccion">
                 <h3>Gastos del Pedido</h3>
-                <table className="sub-table" style={{fontSize: '0.9em'}}> {/* Reutilizando clase de App.css o una similar */}
+                <table className="sub-table" style={{fontSize: '0.9em'}}>
                   <thead>
                     <tr>
                       <th>ID Gasto</th>

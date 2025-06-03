@@ -1,15 +1,22 @@
 // frontend-react/src/App.jsx
 import { useState, useEffect, useCallback } from 'react';
-import './App.css';
+import './App.css'; // Importa los estilos generales de la aplicación
 import FormularioPedidoNacional from './components/FormularioPedidoNacional.jsx';
 import FormularioPedidoImportacion from './components/FormularioPedidoImportacion.jsx';
-import ListaPedidos from './ListaPedidos.jsx'; 
-import TarifaVenta from './components/TarifaVenta.jsx'; 
+import ListaPedidos from './ListaPedidos.jsx';
+import TarifaVenta from './components/TarifaVenta.jsx';
+
+// Componentes de la Fase 5
+import GestionProductosRecetas from './components/GestionProductosRecetas.jsx'; // Nuevo componente combinado
+import GestionMaquinaria from './components/GestionMaquinaria.jsx';
+import GestionProcesosFabricacion from './components/GestionProcesosFabricacion.jsx';
+import GestionOrdenesProduccion from './components/GestionOrdenesProduccion.jsx';
+import GestionStockProductosTerminados from './components/GestionStockProductosTerminados.jsx';
 
 
 // --- Componente Modal Simple para Detalles del Stock (Bobina) ---
+// (Este componente se mantiene igual)
 function DetalleStockModal({ item, onClose, isLoading, error }) {
-  // ... (código del modal DetalleStockModal como lo tenías en la respuesta #38)
   if (!item && !isLoading && !error) return null;
   let fechaEntradaFormateada = 'N/A';
   if (item && item.fecha_entrada_almacen) {
@@ -39,9 +46,9 @@ function DetalleStockModal({ item, onClose, isLoading, error }) {
               {item.ancho !== null && item.ancho !== undefined && <p><strong>Ancho (mm):</strong> {parseFloat(item.ancho).toFixed(0)}</p>}
               {item.color && <p><strong>Color:</strong> {item.color}</p>}
               <p><strong>Estado Bobina:</strong> {item.status || 'N/A'}</p>
-              {item.largo_inicial !== null && item.largo_inicial !== undefined && 
+              {item.largo_inicial !== null && item.largo_inicial !== undefined &&
                 <p><strong>Largo Inicial Bobina:</strong> {parseFloat(item.largo_inicial).toFixed(2)} {unidad}</p>}
-              {item.largo_actual !== null && item.largo_actual !== undefined && 
+              {item.largo_actual !== null && item.largo_actual !== undefined &&
                 <p><strong>Largo Actual Bobina:</strong> {parseFloat(item.largo_actual).toFixed(2)} {unidad}</p>}
               <p><strong>Unidad Medida:</strong> {unidad}</p>
               <p><strong>Coste Unit. Bobina (Compra):</strong> {item.coste_unitario_final !== null && item.coste_unitario_final !== undefined ? parseFloat(item.coste_unitario_final).toFixed(4) + ` €/${unidad}` : 'N/A'}</p>
@@ -71,11 +78,10 @@ function App() {
 
   const [itemSeleccionadoParaModal, setItemSeleccionadoParaModal] = useState(null);
   const [mostrarModalDetalles, setMostrarModalDetalles] = useState(false);
-  const [loadingDetalles, setLoadingDetalles] = useState(false); 
+  const [loadingDetalles, setLoadingDetalles] = useState(false);
   const [errorDetalles, setErrorDetalles] = useState(null);
-  
-  const [vistaActual, setVistaActual] = useState('STOCK');
-  // Para mensajes de feedback de la actualización de estado
+
+  const [vistaActual, setVistaActual] = useState('STOCK'); // Estado para controlar la vista actual
   const [updateStatusMessage, setUpdateStatusMessage] = useState('');
   const [updateStatusError, setUpdateStatusError] = useState('');
 
@@ -83,11 +89,10 @@ function App() {
   const opcionesMaterial = ["", "GOMA", "PVC", "FIELTRO", "MAQUINARIA", "COMPONENTE"];
   const opcionesEstado = ["", "DISPONIBLE", "EMPEZADA", "AGOTADO", "DESCATALOGADO"];
 
+  // Función para obtener y procesar el stock (se mantiene igual)
   const fetchStockAndProcess = useCallback(async () => {
-    // ... (tu función fetchStockAndProcess de la respuesta #38, sin cambios en su lógica interna) ...
     setLoadingStock(true);
     setErrorStock(null);
-    // Limpiar mensajes de actualización de estado al recargar el stock
     setUpdateStatusMessage('');
     setUpdateStatusError('');
 
@@ -137,6 +142,7 @@ function App() {
     fetchStockAndProcess();
   }, [fetchStockAndProcess]);
 
+  // Handlers para filtros y modal (se mantienen iguales)
   const handleMaterialChange = (event) => setFiltroMaterial(event.target.value);
   const handleEstadoChange = (event) => setFiltroEstado(event.target.value);
   const handleBusquedaChange = (event) => setFiltroBusqueda(event.target.value);
@@ -151,9 +157,8 @@ function App() {
     setItemSeleccionadoParaModal(null);
   };
 
-  // --- NUEVA FUNCIÓN para cambiar el estado del stock ---
   const handleChangeStockStatus = async (stockItemId, nuevoEstado) => {
-    setUpdateStatusMessage(''); // Limpiar mensajes anteriores
+    setUpdateStatusMessage('');
     setUpdateStatusError('');
 
     console.log(`Intentando cambiar estado del item ${stockItemId} a ${nuevoEstado}`);
@@ -170,14 +175,17 @@ function App() {
         throw new Error(data.error || data.detalle || `Error del servidor: ${response.status}`);
       }
       setUpdateStatusMessage(data.mensaje || `Estado del item ${stockItemId} actualizado con éxito.`);
-      fetchStockAndProcess(); // Recargar la lista de stock para ver el cambio
+      fetchStockAndProcess();
     } catch (err) {
       console.error(`Error al cambiar estado del item ${stockItemId}:`, err);
       setUpdateStatusError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
 
+  // Función para renderizar la vista actual (modificada para incluir las nuevas vistas)
   const renderVista = () => {
     switch (vistaActual) {
       case 'NACIONAL':
@@ -186,22 +194,31 @@ function App() {
         return <ListaPedidos />;
       case 'IMPORTACION':
         return <FormularioPedidoImportacion />;
-      case 'TARIFA_VENTA': 
+      case 'TARIFA_VENTA':
         return <TarifaVenta />;
+      case 'PRODUCTOS_RECETAS': // Cambiado a GestionProductosRecetas
+        return <GestionProductosRecetas />;
+      case 'MAQUINARIA':
+        return <GestionMaquinaria />;
+      case 'PROCESOS_FABRICACION':
+        return <GestionProcesosFabricacion />;
+      case 'ORDENES_PRODUCCION':
+        return <GestionOrdenesProduccion />;
+      case 'STOCK_PRODUCTOS_TERMINADOS':
+        return <GestionStockProductosTerminados />;
       case 'STOCK':
       default:
+        // Vista de Stock de Materias Primas (se mantiene igual)
         if (loadingStock) return <p>Cargando stock...</p>;
         if (errorStock) return <p className="error-backend">Error al cargar lista de stock: {errorStock}</p>;
-        
+
         return (
           <>
-            <h2>Stock Actual (Bobinas Individuales)</h2>
-            {/* Mensajes de feedback para la actualización de estado */}
+            <h2>Stock Actual (Materias Primas)</h2> {/* Título ajustado */}
             {updateStatusMessage && <p className="success-message" style={{textAlign: 'center'}}>{updateStatusMessage}</p>}
             {updateStatusError && <p className="error-backend" style={{textAlign: 'center'}}>{updateStatusError}</p>}
 
             <div className="filtros-container">
-              {/* ... (tus filtros existentes) ... */}
               <div className="filtro-item">
                 <label htmlFor="filtro-material">Material: </label>
                 <select id="filtro-material" value={filtroMaterial} onChange={handleMaterialChange}>
@@ -219,9 +236,9 @@ function App() {
                 <input type="text" id="filtro-busqueda" value={filtroBusqueda} onChange={handleBusquedaChange} placeholder="Escribe para buscar..."/>
               </div>
             </div>
-            
+
             {stockList.length === 0 && <p>No hay bobinas de stock que coincidan con los filtros o no hay stock.</p>}
-            
+
             {stockList.length > 0 && (
               <table>
                 <thead>
@@ -232,7 +249,7 @@ function App() {
                     <th>Subtipo</th>
                     <th>Largo Actual</th>
                     <th>Estado Bobina</th>
-                    <th>Acciones Estado</th> {/* Nueva Columna */}
+                    <th>Acciones Estado</th>
                     <th>Ver Detalles</th>
                   </tr>
                 </thead>
@@ -245,18 +262,18 @@ function App() {
                       <td>{bobina.subtipo_material || '-'}</td>
                       <td>{parseFloat(bobina.largo_actual || 0).toFixed(2)} {bobina.unidad_medida || 'm'}</td>
                       <td>{bobina.status}</td>
-                      <td> {/* Acciones para cambiar estado */}
+                      <td>
                         {bobina.status === 'DISPONIBLE' && (
-                          <button 
+                          <button
                             onClick={() => handleChangeStockStatus(bobina.id, 'EMPEZADA')}
-                            className="action-button empezada" 
+                            className="action-button empezada"
                             title="Marcar como Empezada"
                           >
                             Empezar
                           </button>
                         )}
                         {bobina.status === 'EMPEZADA' && (
-                          <button 
+                          <button
                             onClick={() => handleChangeStockStatus(bobina.id, 'AGOTADO')}
                             className="action-button agotada"
                             title="Marcar como Agotada"
@@ -264,13 +281,9 @@ function App() {
                             Agotar
                           </button>
                         )}
-                        {/* Podrías añadir un botón para volver a 'DISPONIBLE' desde 'AGOTADO' si es necesario */}
-                        {/* {bobina.status === 'AGOTADO' && (
-                          <button onClick={() => handleChangeStockStatus(bobina.id, 'DISPONIBLE')}>Reactivar</button>
-                        )} */}
                       </td>
                       <td>
-                        <button 
+                        <button
                           className="details-button"
                           onClick={() => handleVerDetallesBobina(bobina)}
                         >
@@ -288,26 +301,41 @@ function App() {
   };
 
   return (
-    <div className="container">
-      <h1>Gestión de Almacén</h1>
-      <nav className="app-nav">
-        <button onClick={() => setVistaActual('STOCK')} disabled={vistaActual === 'STOCK'}>Ver Stock</button>
-        <button onClick={() => setVistaActual('LISTA_PEDIDOS')} disabled={vistaActual === 'LISTA_PEDIDOS'}>Ver Pedidos</button>
-        <button onClick={() => setVistaActual('TARIFA_VENTA')} disabled={vistaActual === 'TARIFA_VENTA'}>Ver Tarifa Venta</button> 
-        <button onClick={() => setVistaActual('NACIONAL')} disabled={vistaActual === 'NACIONAL'}>Nuevo Pedido Nacional</button>
-        <button onClick={() => setVistaActual('IMPORTACION')} disabled={vistaActual === 'IMPORTACION'}>Nuevo Pedido Importación</button>
+    <div className="app-layout"> {/* Contenedor principal para el layout */}
+      <nav className="sidebar"> {/* Barra de navegación lateral */}
+        <h1 className="app-title">Gestión de Almacén</h1> {/* Título de la aplicación */}
+        <div className="sidebar-section">
+          <h3>Materias Primas</h3> {/* Título de sección ajustado */}
+          <button onClick={() => setVistaActual('STOCK')} disabled={vistaActual === 'STOCK'}>Ver Stock</button>
+          <button onClick={() => setVistaActual('LISTA_PEDIDOS')} disabled={vistaActual === 'LISTA_PEDIDOS'}>Ver Pedidos</button>
+          <button onClick={() => setVistaActual('TARIFA_VENTA')} disabled={vistaActual === 'TARIFA_VENTA'}>Ver Tarifa Venta</button>
+          <button onClick={() => setVistaActual('NACIONAL')} disabled={vistaActual === 'NACIONAL'}>Nuevo Pedido Nacional</button>
+          <button onClick={() => setVistaActual('IMPORTACION')} disabled={vistaActual === 'IMPORTACION'}>Nuevo Pedido Importación</button>
+        </div>
+
+        <div className="sidebar-section">
+          <h3>Fabricación y Productos Finales</h3>
+          <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión Productos y Recetas</button> {/* Botón combinado */}
+          <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
+          <button onClick={() => setVistaActual('PROCESOS_FABRICACION')} disabled={vistaActual === 'PROCESOS_FABRICACION'}>Gestión Procesos</button>
+          <button onClick={() => setVistaActual('ORDENES_PRODUCCION')} disabled={vistaActual === 'ORDENES_PRODUCCION'}>Órdenes Producción</button>
+          <button onClick={() => setVistaActual('STOCK_PRODUCTOS_TERMINADOS')} disabled={vistaActual === 'STOCK_PRODUCTOS_TERMINADOS'}>Stock Productos Finales</button>
+        </div>
+        {/* Puedes añadir más secciones aquí si es necesario */}
       </nav>
-      
-      <div className="vista-contenido">
-        {renderVista()}
+
+      <div className="main-content-area"> {/* Área principal de contenido */}
+        <div className="container"> {/* Tu contenedor actual para el contenido de la vista */}
+          {renderVista()}
+        </div>
       </div>
 
       {mostrarModalDetalles && (
-        <DetalleStockModal 
-          item={itemSeleccionadoParaModal} 
-          onClose={cerrarModalDetalles} 
-          isLoading={loadingDetalles} 
-          error={errorDetalles}     
+        <DetalleStockModal
+          item={itemSeleccionadoParaModal}
+          onClose={cerrarModalDetalles}
+          isLoading={loadingDetalles}
+          error={errorDetalles}
         />
       )}
     </div>

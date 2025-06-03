@@ -8,23 +8,40 @@
   --color-verde-primario: #4CAF50; /* Un verde principal agradable */
   --color-verde-oscuro: #0e3810;  /* Un verde más oscuro para hover o bordes */
   --color-verde-claro: #C8E6C9;   /* Un verde claro para fondos suaves o acentos */
-  --color-texto-sobre-verde: #ffffff; /* Texto blanco para botones verdes */
+  --color-verde-muy-claro: #E8F5E9; /* Un verde muy claro para fondos sutiles */
+  --color-texto-sobre-verde: #ffffff; /* Texto blanco para elementos con fondo verde */
 
-  /* Variables para el tema claro (predeterminado si no hay media query) */
-  --color-texto-principal: #213547;
-  --color-fondo-principal: #ffffff;
+  /* Colores Neutros (oscuros para texto, claros para fondos) */
+  --color-texto-oscuro-neutro: #213547; /* Texto oscuro para contrastar con fondos claros */
+  --color-fondo-claro-neutro: #ffffff; /* Fondo blanco puro */
+  --color-borde-neutro: #D0D0D0; /* Borde gris claro para elementos neutros */
+
+  /* Colores de Enlace */
   --color-enlace: var(--color-verde-primario);
   --color-enlace-hover: var(--color-verde-oscuro);
-  --color-boton-fondo: #f0f0f0; /* Un gris claro para botones por defecto */
-  --color-boton-texto: #b59a9a;
+
+  /* Colores de Botón */
+  --color-boton-fondo-claro: #f0f0f0; /* Un gris muy claro para botones por defecto */
+  --color-boton-texto-claro: var(--color-texto-oscuro-neutro); /* Texto oscuro para botones claros */
   --color-boton-borde-hover: var(--color-verde-primario);
   --color-foco-outline: var(--color-verde-primario);
 
+  /* Colores de Input/Select */
+  --color-input-fondo-claro: #ffffff; /* Fondo blanco para inputs y selects */
+  --color-input-texto-claro: var(--color-texto-oscuro-neutro); /* Texto oscuro para inputs y selects */
+  --color-input-borde-claro: #ccc; /* Borde gris claro para inputs y selects */
+  --color-input-foco-borde-claro: var(--color-verde-primario);
+
+  /* Colores de Error (manteniendo semántica roja con fondos claros) */
+  --color-error-fondo: #F8D7DA; /* Rojo muy claro */
+  --color-error-borde: #F5C6CB; /* Borde rojo claro */
+  --color-error-texto: #721C24; /* Texto rojo oscuro */
+
 
   color-scheme: light dark;
-  /* Ajustes para el tema oscuro por defecto de Vite */
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #f4eded;
+  /* Ajustes por defecto (serán sobreescritos por las media queries) */
+  color: var(--color-texto-oscuro-neutro);
+  background-color: var(--color-fondo-claro-neutro);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -35,8 +52,14 @@
 /* Aplicamos variables al tema claro explícitamente */
 @media (prefers-color-scheme: light) {
   :root {
-    color: var(--color-texto-principal);
-    background-color: var(--color-fondo-principal);
+    --color-texto-principal: var(--color-texto-oscuro-neutro);
+    --color-fondo-principal: var(--color-fondo-claro-neutro);
+    --color-boton-fondo: var(--color-boton-fondo-claro);
+    --color-boton-texto: var(--color-boton-texto-claro);
+    --color-input-fondo: var(--color-input-fondo-claro);
+    --color-input-texto: var(--color-input-texto-claro);
+    --color-input-borde: var(--color-input-borde-claro);
+    --color-input-foco-borde: var(--color-input-foco-borde-claro);
   }
   a {
     color: var(--color-enlace);
@@ -47,7 +70,7 @@
   button {
     background-color: var(--color-boton-fondo);
     color: var(--color-boton-texto);
-    border: 1px solid #ccc; /* Un borde sutil para botones en tema claro */
+    border: 1px solid var(--color-input-borde);
   }
   button:hover {
     border-color: var(--color-boton-borde-hover);
@@ -55,86 +78,101 @@
   button:focus,
   button:focus-visible {
     outline: 4px auto var(--color-foco-outline);
-    /* O si prefieres un borde más sutil en foco:
-    border-color: var(--color-foco-outline);
+  }
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  textarea,
+  select {
+    background-color: var(--color-input-fondo);
+    color: var(--color-input-texto);
+    border: 1px solid var(--color-input-borde);
+  }
+  input[type="text"]:focus,
+  input[type="number"]:focus,
+  input[type="date"]:focus,
+  textarea:focus,
+  select:focus {
+    border-color: var(--color-input-foco-borde);
     box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25);
     outline: none;
-    */
   }
 }
 
-/* Aplicamos variables al tema oscuro (ajusta estos colores a tu gusto para el verde en oscuro) */
+/* Aplicamos variables al tema oscuro (que ahora tendrá fondos claros, no negros) */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-texto-principal-dark: rgba(255, 255, 255, 0.87);
-    --color-fondo-principal-dark: #f4eded;
-    --color-enlace-dark: var(--color-verde-primario); /* Verde también puede funcionar bien en oscuro */
-    --color-enlace-hover-dark: #a5d6a7; /* Un verde más claro para hover en oscuro */
-    --color-boton-fondo-dark: #8bca66; /* Botones un poco más claros que el fondo */
-    --color-boton-texto-dark: rgba(255, 255, 255, 0.87);
-    --color-boton-borde-hover-dark: var(--color-verde-primario);
-    --color-foco-outline-dark: var(--color-verde-primario);
-
-    color: var(--color-texto-principal-dark);
-    background-color: var(--color-fondo-principal-dark);
+    --color-texto-principal: var(--color-texto-oscuro-neutro); /* Texto oscuro */
+    --color-fondo-principal: var(--color-fondo-claro-neutro); /* Fondo blanco */
+    --color-boton-fondo: var(--color-boton-fondo-claro);
+    --color-boton-texto: var(--color-boton-texto-claro);
+    --color-input-fondo: var(--color-input-fondo-claro);
+    --color-input-texto: var(--color-input-texto-claro);
+    --color-input-borde: var(--color-input-borde-claro);
+    --color-input-foco-borde: var(--color-input-foco-borde-claro);
   }
   a {
-    color: var(--color-enlace-dark);
+    color: var(--color-enlace);
   }
   a:hover {
-    color: var(--color-enlace-hover-dark);
+    color: var(--color-enlace-hover);
   }
   button {
-    background-color: var(--color-boton-fondo-dark);
-    color: var(--color-boton-texto-dark);
-    border: 1px solid #0e0e0e; /* Borde sutil para botones en tema oscuro */
+    background-color: var(--color-boton-fondo);
+    color: var(--color-boton-texto);
+    border: 1px solid var(--color-input-borde);
   }
   button:hover {
-    border-color: var(--color-boton-borde-hover-dark);
+    border-color: var(--color-boton-borde-hover);
   }
    button:focus,
   button:focus-visible {
-    outline-color: var(--color-foco-outline-dark);
-     /* O si prefieres un borde más sutil en foco:
-    border-color: var(--color-foco-outline-dark);
-    box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25); // Ajusta el alfa para oscuro
+    outline-color: var(--color-foco-outline);
+  }
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  textarea,
+  select {
+    background-color: var(--color-input-fondo);
+    color: var(--color-input-texto);
+    border: 1px solid var(--color-input-borde);
+  }
+  input[type="text"]:focus,
+  input[type="number"]:focus,
+  input[type="date"]:focus,
+  textarea:focus,
+  select:focus {
+    border-color: var(--color-input-foco-borde);
+    box-shadow: 0 0 0 0.2rem rgba(76, 175, 80, .25);
     outline: none;
-    */
   }
 }
 
 
 a {
   font-weight: 500;
-  /* color y hover se definen ahora en las media queries */
   text-decoration: inherit;
-  transition: color 0.2s ease-in-out; /* Transición suave para enlaces */
+  transition: color 0.2s ease-in-out;
 }
-/* a:hover se define en las media queries */
 
 body {
   margin: 0;
-  /* display: flex; place-items: center; */ /* Comentado para permitir scroll y layout normal */
   min-width: 320px;
   min-height: 100vh;
-  /* font-family y otros se heredan de :root */
 }
 
 h1 {
-  font-size: 2.2em; /* Ligeramente ajustado para consistencia */
+  font-size: 2.2em;
   line-height: 1.1;
-  /* color se hereda */
 }
 
 button {
-  border-radius: 6px; /* Un poco menos redondeado */
-  /* border se define en las media queries */
+  border-radius: 6px;
   padding: 0.6em 1.2em;
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  /* background-color y color se definen en las media queries */
   cursor: pointer;
-  transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out; /* Transiciones añadidas */
+  transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out;
 }
-/* button:hover y focus se definen en las media queries */
