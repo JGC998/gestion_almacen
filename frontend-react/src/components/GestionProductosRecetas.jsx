@@ -14,33 +14,44 @@ function GestionProductosRecetas() {
     referencia: '',
     nombre: '',
     descripcion: '',
-    unidad_medida: 'unidad',
+    unidad_medida: 'unidad', // FIJO A "unidad" por defecto
     coste_fabricacion_estandar: '',
-    margen_venta_default: '',
-    precio_venta_sugerido: '',
-    coste_extra_unitario: '',
+    margen_venta_default: '', // Este campo se gestiona en configuración, no aquí
+    precio_venta_sugerido: '', // Este campo se gestiona en configuración, no aquí
+    coste_extra_unitario: '', // Este campo se gestiona en configuración, no aquí
     status: 'ACTIVO'
   });
-  const [stockReferencias, setStockReferencias] = useState([]); // Para el desplegable de referencias de stock
+  // stockReferencias ahora contiene todos los materiales genéricos (MP y Componentes)
+  const [materialesGenericos, setMaterialesGenericos] = useState([]); 
 
   // --- Estados para Recetas ---
   const [recetas, setRecetas] = useState([]);
-  const [loadingRecetas, setLoadingRecetas] = useState(false); // Se carga después de seleccionar producto
+  const [loadingRecetas, setLoadingRecetas] = useState(false);
   const [errorRecetas, setErrorRecetas] = useState(null);
   const [successRecetaMessage, setSuccessRecetaMessage] = useState('');
   const [editModeReceta, setEditModeReceta] = useState(false);
   const [currentReceta, setCurrentReceta] = useState({
     id: null,
-    producto_terminado_id: '', // Se llenará automáticamente al seleccionar un producto
-    material_id: '',
-    componente_id: '',
-    notas: ''
+    producto_terminado_id: '',
+    // Campos genéricos para materias primas
+    material_tipo_generico: '',
+    subtipo_material_generico: '',
+    espesor_generico: '',
+    ancho_generico: '',
+    color_generico: '',
+    // Campo genérico para componentes
+    componente_ref_generico: '',
+    // Campos de cantidad y peso
+    cantidad_requerida: '',
+    unidad_medida_requerida: '',
+    unidades_por_ancho_material: '',
+    peso_por_unidad_producto: '',
+    notas: '',
+    // Campo temporal para el selector de tipo (materia_prima/componente)
+    material_or_component_type_selector: '' 
   });
 
-  // --- Datos para Selects de Recetas ---
-  const [materiasPrimas, setMateriasPrimas] = useState([]);
-  const [componentes, setComponentes] = useState([]);
-  const [selectedProductForReceta, setSelectedProductForReceta] = useState(null); // Producto seleccionado para ver/añadir recetas
+  const [selectedProductForReceta, setSelectedProductForReceta] = useState(null);
 
   // --- Fetch de Productos Terminados ---
   const fetchProductos = useCallback(async () => {
@@ -62,30 +73,20 @@ function GestionProductosRecetas() {
     }
   }, []);
 
-  // --- Fetch de Materias Primas y Componentes (para selects de Recetas y Referencias de Producto) ---
-  const fetchMaterialesYComponentes = useCallback(async () => {
+  // --- Fetch de Materiales y Componentes Genéricos (para selects de Recetas) ---
+  const fetchMaterialesGenericos = useCallback(async () => {
     try {
-      const [stockRes, compRes, refsRes] = await Promise.all([
-        fetch('http://localhost:5002/api/stock'), // Asume que esto trae materias primas
-        fetch('http://localhost:5002/api/stock-componentes'), // Endpoint para componentes si existe
-        fetch('http://localhost:5002/api/stock-referencias-ultimocoste') // Nuevo endpoint
-      ]);
-
-      if (!stockRes.ok) throw new Error(`Error al cargar stock de materias primas: ${stockRes.status}`);
-      if (!compRes.ok) console.warn(`Advertencia: No se pudo cargar stock de componentes: ${compRes.status}. Usando solo MP.`); // No lanzar error fatal si no hay endpoint de componentes
-      if (!refsRes.ok) throw new Error(`Error al cargar referencias de stock: ${refsRes.status}`);
-
-
-      const stockData = await stockRes.json();
-      const compData = await compRes.json();
-      const refsData = await refsRes.json();
-
-      setMateriasPrimas(stockData.filter(item => item.material_tipo !== 'COMPONENTE' && item.material_tipo !== 'MAQUINARIA'));
-      setComponentes(compData); // Usar datos de componentes si hay un endpoint específico
-      setStockReferencias(refsData); // Guardar las referencias de stock
+      // Ahora llamamos a un endpoint que nos devuelve todos los materiales genéricos
+      const response = await fetch('http://localhost:5002/api/materiales-genericos');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Error al cargar materiales genéricos: ${response.status}`);
+      }
+      const data = await response.json();
+      setMaterialesGenericos(data);
     } catch (err) {
-      console.error("Error al cargar dependencias para recetas/productos:", err);
-      setErrorRecetas(err.message); // Usamos el error de recetas para esto
+      console.error("Error al cargar materiales genéricos para recetas:", err);
+      setErrorRecetas(err.message);
     }
   }, []);
 
@@ -112,14 +113,13 @@ function GestionProductosRecetas() {
 
   useEffect(() => {
     fetchProductos();
-    fetchMaterialesYComponentes();
-  }, [fetchProductos, fetchMaterialesYComponentes]);
+    fetchMaterialesGenericos(); // Cargar materiales genéricos al inicio
+  }, [fetchProductos, fetchMaterialesGenericos]);
 
   // Cuando se selecciona un producto para ver/añadir recetas
   useEffect(() => {
     if (selectedProductForReceta) {
       fetchRecetasForProduct(selectedProductForReceta.id);
-      // Reiniciar el formulario de receta al seleccionar un nuevo producto
       resetRecetaForm(selectedProductForReceta.id);
     } else {
       setRecetas([]);
@@ -134,30 +134,14 @@ function GestionProductosRecetas() {
     setCurrentProduct(prev => ({ ...prev, [name]: value }));
   };
 
-  // Nuevo handler para seleccionar referencia de stock y auto-rellenar
+  // handleSelectStockReference ya no auto-rellena, solo se usará para el selector de stock en la calculadora de presupuestos
+  // Aquí podemos eliminarlo o adaptarlo si se decide usar para algo más en el futuro.
+  // Por ahora, el formulario de producto terminado no usa una referencia de stock para auto-rellenar.
   const handleSelectStockReference = (e) => {
-    const selectedRef = e.target.value;
-    if (selectedRef === "") {
-        setCurrentProduct(prev => ({
-            ...prev,
-            referencia: '',
-            nombre: '',
-            coste_fabricacion_estandar: '', // Limpiar también el coste
-            // Otros campos que quieras limpiar/resetear
-        }));
-        return;
-    }
-    const selectedItem = stockReferencias.find(item => item.referencia_stock === selectedRef);
-    if (selectedItem) {
-        setCurrentProduct(prev => ({
-            ...prev,
-            referencia: selectedItem.referencia_stock,
-            nombre: `${selectedItem.material_tipo} ${selectedItem.subtipo_material || ''} ${selectedItem.espesor || ''} ${selectedItem.ancho || ''}mm ${selectedItem.color || ''}`.trim(),
-            coste_fabricacion_estandar: parseFloat(selectedItem.coste_unitario_final || 0).toFixed(4),
-            unidad_medida: selectedItem.unidad_medida || 'unidad'
-            // Puedes rellenar más campos si lo consideras oportuno
-        }));
-    }
+    // Esta función ya no tiene el mismo propósito aquí.
+    // El formulario de Producto Terminado ahora solo crea el producto, sin vincularlo a una bobina específica.
+    // Mantenemos la función como un placeholder o si se decide reutilizarla para otra cosa.
+    console.log("handleSelectStockReference llamado, pero ya no auto-rellena productos terminados.");
   };
 
 
@@ -166,9 +150,7 @@ function GestionProductosRecetas() {
       ...product,
       // Asegurarse de que los números se muestren correctamente en el formulario
       coste_fabricacion_estandar: product.coste_fabricacion_estandar !== null ? parseFloat(product.coste_fabricacion_estandar).toFixed(4) : '',
-      margen_venta_default: product.margen_venta_default !== null ? parseFloat(product.margen_venta_default).toFixed(2) : '',
-      precio_venta_sugerido: product.precio_venta_sugerido !== null ? parseFloat(product.precio_venta_sugerido).toFixed(2) : '',
-      coste_extra_unitario: product.coste_extra_unitario !== null ? parseFloat(product.coste_extra_unitario).toFixed(2) : '',
+      // margen_venta_default, precio_venta_sugerido, coste_extra_unitario ya no se editan aquí
     });
     setEditModeProducto(true);
     setSuccessProductoMessage('');
@@ -209,6 +191,16 @@ function GestionProductosRecetas() {
     setSuccessProductoMessage('');
     setErrorProductos(null);
 
+    const payload = {
+        referencia: currentProduct.referencia,
+        nombre: currentProduct.nombre,
+        descripcion: currentProduct.descripcion,
+        unidad_medida: 'unidad', // Siempre "unidad"
+        // Los campos de coste, margen y precio sugerido no se envían desde aquí al crear
+        // porque se calculan o gestionan en otro lugar.
+        status: currentProduct.status
+    };
+
     const method = editModeProducto ? 'PUT' : 'POST';
     const url = editModeProducto
       ? `http://localhost:5002/api/productos-terminados/${currentProduct.id}`
@@ -218,7 +210,7 @@ function GestionProductosRecetas() {
       const response = await fetch(url, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentProduct)
+        body: JSON.stringify(payload)
       });
       const data = await response.json();
       if (!response.ok) {
@@ -260,99 +252,31 @@ function GestionProductosRecetas() {
     setCurrentReceta(prev => ({ ...prev, [name]: value }));
   };
 
-  // Función para rellenar campos de material/componente al seleccionar
-  const handleMaterialOrComponentSelect = (e) => {
-    const selectedId = parseInt(e.target.value);
-    const selectedType = e.target.name; // 'material_id' or 'componente_id'
-
-    let selectedItem = null;
-    let materialRef = '';
-    let materialType = '';
-    let materialEspesor = '';
-    let materialAncho = '';
-    let materialColor = '';
-    let materialUnidad = '';
-    let materialDescripcion = ''; // Para componentes
-
-    if (selectedType === 'material_id') {
-      selectedItem = materiasPrimas.find(mp => mp.id === selectedId);
-      if (selectedItem) {
-        materialRef = selectedItem.referencia_stock;
-        materialType = selectedItem.material_tipo;
-        materialEspesor = selectedItem.espesor;
-        materialAncho = selectedItem.ancho;
-        materialColor = selectedItem.color;
-        materialUnidad = selectedItem.unidad_medida;
-      }
-    } else if (selectedType === 'componente_id') {
-      selectedItem = componentes.find(comp => comp.id === selectedId);
-      if (selectedItem) {
-        materialRef = selectedItem.componente_ref;
-        materialType = 'COMPONENTE';
-        materialDescripcion = selectedItem.descripcion;
-        materialUnidad = selectedItem.unidad_medida;
-      }
-    }
-
+  // Handler para el selector de tipo de material/componente en la receta
+  const handleMaterialOrComponentTypeChange = (e) => {
+    const { value } = e.target;
     setCurrentReceta(prev => ({
       ...prev,
-      [selectedType]: e.target.value, // Guardar el ID seleccionado
-      // Rellenar campos para mostrar en la interfaz (no se guardan en la DB de receta)
-      display_material_ref: materialRef,
-      display_material_type: materialType,
-      display_material_espesor: materialEspesor,
-      display_material_ancho: materialAncho,
-      display_material_color: materialColor,
-      display_material_unidad: materialUnidad,
-      display_material_descripcion: materialDescripcion,
+      material_or_component_type_selector: value,
+      // Limpiar campos genéricos del otro tipo al cambiar
+      material_tipo_generico: value === 'materia_prima' ? prev.material_tipo_generico : '',
+      subtipo_material_generico: value === 'materia_prima' ? prev.subtipo_material_generico : '',
+      espesor_generico: value === 'materia_prima' ? prev.espesor_generico : '',
+      ancho_generico: value === 'materia_prima' ? prev.ancho_generico : '',
+      color_generico: value === 'materia_prima' ? prev.color_generico : '',
+      componente_ref_generico: value === 'componente' ? prev.componente_ref_generico : '',
     }));
   };
 
-
   const handleEditReceta = (receta) => {
-    // Rellenar los campos de display para que se muestren al editar
-    let displayMaterialRef = '';
-    let displayMaterialType = '';
-    let displayMaterialEspesor = '';
-    let displayMaterialAncho = '';
-    let displayMaterialColor = '';
-    let displayMaterialUnidad = '';
-    let displayMaterialDescripcion = '';
-
-    if (receta.material_id) {
-        const mp = materiasPrimas.find(m => m.id === receta.material_id);
-        if (mp) {
-            displayMaterialRef = mp.referencia_stock;
-            displayMaterialType = mp.material_tipo;
-            displayMaterialEspesor = mp.espesor;
-            displayMaterialAncho = mp.ancho;
-            displayMaterialColor = mp.color;
-            displayMaterialUnidad = mp.unidad_medida;
-        }
-    } else if (receta.componente_id) {
-        const comp = componentes.find(c => c.id === receta.componente_id);
-        if (comp) {
-            displayMaterialRef = comp.componente_ref;
-            displayMaterialType = 'COMPONENTE';
-            displayMaterialDescripcion = comp.descripcion;
-            displayMaterialUnidad = comp.unidad_medida;
-        }
-    }
-
     setCurrentReceta({
       ...receta,
-      // Asegurarse de que los IDs sean strings para los selects
       producto_terminado_id: String(receta.producto_terminado_id),
-      material_id: receta.material_id ? String(receta.material_id) : '',
-      componente_id: receta.componente_id ? String(receta.componente_id) : '',
-      // Campos de display para la UI
-      display_material_ref: displayMaterialRef,
-      display_material_type: displayMaterialType,
-      display_material_espesor: displayMaterialEspesor,
-      display_material_ancho: displayMaterialAncho,
-      display_material_color: displayMaterialColor,
-      display_material_unidad: displayMaterialUnidad,
-      display_material_descripcion: displayMaterialDescripcion,
+      cantidad_requerida: parseFloat(receta.cantidad_requerida).toFixed(2),
+      unidades_por_ancho_material: receta.unidades_por_ancho_material !== null ? parseFloat(receta.unidades_por_ancho_material).toFixed(2) : '',
+      peso_por_unidad_producto: receta.peso_por_unidad_producto !== null ? parseFloat(receta.peso_por_unidad_producto).toFixed(4) : '',
+      // Determinar el valor del selector de tipo al editar
+      material_or_component_type_selector: receta.material_tipo_generico ? 'materia_prima' : (receta.componente_ref_generico ? 'componente' : '')
     });
     setEditModeReceta(true);
     setSuccessRecetaMessage('');
@@ -395,27 +319,48 @@ function GestionProductosRecetas() {
     setSuccessRecetaMessage('');
     setErrorRecetas(null);
 
-    // Validar que se seleccionó un material o un componente, no ambos
-    if ((currentReceta.material_id && currentReceta.componente_id) || (!currentReceta.material_id && !currentReceta.componente_id)) {
-        setErrorRecetas("Debe seleccionar un Material O un Componente, no ambos.");
-        setLoadingRecetas(false);
-        return;
+    // Validar que se seleccionó un tipo y que los campos necesarios están llenos
+    if (!currentReceta.material_or_component_type_selector) {
+        setErrorRecetas("Debe seleccionar si es Materia Prima o Componente.");
+        setLoadingRecetas(false); return;
+    }
+    if (currentReceta.material_or_component_type_selector === 'materia_prima' && !currentReceta.material_tipo_generico) {
+        setErrorRecetas("Debe seleccionar un Tipo de Material para la Materia Prima.");
+        setLoadingRecetas(false); return;
+    }
+    if (currentReceta.material_or_component_type_selector === 'componente' && !currentReceta.componente_ref_generico) {
+        setErrorRecetas("Debe seleccionar una Referencia de Componente.");
+        setLoadingRecetas(false); return;
+    }
+    if (!currentReceta.cantidad_requerida || !currentReceta.unidad_medida_requerida) {
+        setErrorRecetas("Cantidad requerida y unidad de medida son obligatorias.");
+        setLoadingRecetas(false); return;
     }
 
+
     const payload = {
-      ...currentReceta,
       producto_terminado_id: parseInt(currentReceta.producto_terminado_id),
-      material_id: currentReceta.material_id ? parseInt(currentReceta.material_id) : null,
-      componente_id: currentReceta.componente_id ? parseInt(currentReceta.componente_id) : null,
-      // Eliminamos los campos de display del payload
-      display_material_ref: undefined,
-      display_material_type: undefined,
-      display_material_espesor: undefined,
-      display_material_ancho: undefined,
-      display_material_color: undefined,
-      display_material_unidad: undefined,
-      display_material_descripcion: undefined,
+      cantidad_requerida: parseFloat(currentReceta.cantidad_requerida),
+      unidad_medida_requerida: currentReceta.unidad_medida_requerida,
+      unidades_por_ancho_material: currentReceta.unidades_por_ancho_material ? parseFloat(currentReceta.unidades_por_ancho_material) : null,
+      peso_por_unidad_producto: currentReceta.peso_por_unidad_producto ? parseFloat(currentReceta.peso_por_unidad_producto) : null,
+      notas: currentReceta.notas,
+      // Campos genéricos condicionales
+      material_tipo_generico: currentReceta.material_or_component_type_selector === 'materia_prima' ? currentReceta.material_tipo_generico : null,
+      subtipo_material_generico: currentReceta.material_or_component_type_selector === 'materia_prima' ? (currentReceta.subtipo_material_generico || null) : null,
+      espesor_generico: currentReceta.material_or_component_type_selector === 'materia_prima' ? (currentReceta.espesor_generico || null) : null,
+      ancho_generico: currentReceta.material_or_component_type_selector === 'materia_prima' ? (currentReceta.ancho_generico ? parseFloat(currentReceta.ancho_generico) : null) : null,
+      color_generico: currentReceta.material_or_component_type_selector === 'materia_prima' ? (currentReceta.color_generico || null) : null,
+      componente_ref_generico: currentReceta.material_or_component_type_selector === 'componente' ? currentReceta.componente_ref_generico : null,
     };
+    
+    // Eliminar campos vacíos o nulos para evitar problemas de base de datos con UNIQUE constraints en el backend si se envían valores vacíos
+    Object.keys(payload).forEach(key => {
+      if (payload[key] === '' || payload[key] === null) {
+        delete payload[key];
+      }
+    });
+
 
     const method = editModeReceta ? 'PUT' : 'POST';
     const url = editModeReceta
@@ -434,7 +379,7 @@ function GestionProductosRecetas() {
         throw new Error(errData.error || `Error ${response.status}`);
       }
       setSuccessRecetaMessage(data.mensaje || `Receta ${editModeReceta ? 'actualizada' : 'creada'} con éxito.`);
-      resetRecetaForm(selectedProductForReceta.id); // Pasa el ID para mantener el producto seleccionado
+      resetRecetaForm(selectedProductForReceta.id);
       if (selectedProductForReceta) {
         fetchRecetasForProduct(selectedProductForReceta.id);
       }
@@ -450,17 +395,19 @@ function GestionProductosRecetas() {
     setEditModeReceta(false);
     setCurrentReceta({
       id: null,
-      producto_terminado_id: productId, // Mantener el ID del producto seleccionado
-      material_id: '',
-      componente_id: '',
+      producto_terminado_id: productId,
+      material_tipo_generico: '',
+      subtipo_material_generico: '',
+      espesor_generico: '',
+      ancho_generico: '',
+      color_generico: '',
+      componente_ref_generico: '',
+      cantidad_requerida: '',
+      unidad_medida_requerida: '',
+      unidades_por_ancho_material: '',
+      peso_por_unidad_producto: '',
       notas: '',
-      display_material_ref: '', // Limpiar campos de display
-      display_material_type: '',
-      display_material_espesor: '',
-      display_material_ancho: '',
-      display_material_color: '',
-      display_material_unidad: '',
-      display_material_descripcion: '',
+      material_or_component_type_selector: ''
     });
     setSuccessRecetaMessage('');
     setErrorRecetas(null);
@@ -478,28 +425,30 @@ function GestionProductosRecetas() {
         <form onSubmit={handleSubmitProduct} className="form-container">
           <h3>{editModeProducto ? 'Editar Producto' : 'Crear Nuevo Producto'}</h3>
           <div className="form-grid">
-            {/* Selector de Referencia de Stock para auto-rellenar */}
-            {!editModeProducto && (
-              <label>Seleccionar de Referencia de Stock (Opcional):
-                <select onChange={handleSelectStockReference} value={currentProduct.referencia || ""}>
-                  <option value="">-- Seleccione una referencia --</option>
-                  {stockReferencias.map(ref => (
-                    <option key={ref.referencia_stock} value={ref.referencia_stock}>
-                      {ref.referencia_stock} ({ref.material_tipo} {ref.espesor || ''} {ref.ancho || ''}mm - Último Coste: {parseFloat(ref.coste_unitario_final || 0).toFixed(4)}€)
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+            {/* El selector de Referencia de Stock ya no auto-rellena aquí */}
+            {/* <label>Seleccionar de Referencia de Stock (Opcional):
+              <select onChange={handleSelectStockReference} value={currentProduct.referencia || ""}>
+                <option value="">-- Seleccione una referencia --</option>
+                {materialesGenericos.filter(m => m.type === 'materia_prima').map(ref => (
+                  <option key={ref.referencia_stock} value={ref.referencia_stock}>
+                    {ref.display}
+                  </option>
+                ))}
+              </select>
+            </label> */}
 
-            <label>Referencia: <input type="text" name="referencia" value={currentProduct.referencia} onChange={handleProductChange} required={!editModeProducto} readOnly={!editModeProducto && currentProduct.referencia !== ''} /></label> {/* ReadOnly si se selecciona de la lista */}
+            <label>Referencia: <input type="text" name="referencia" value={currentProduct.referencia} onChange={handleProductChange} required /></label>
             <label>Nombre: <input type="text" name="nombre" value={currentProduct.nombre} onChange={handleProductChange} required /></label>
             <label>Descripción: <textarea name="descripcion" value={currentProduct.descripcion} onChange={handleProductChange}></textarea></label>
-            <label>Unidad Medida: <input type="text" name="unidad_medida" value={currentProduct.unidad_medida} onChange={handleProductChange} /></label>
-            <label>Coste Estándar: <input type="number" step="0.0001" name="coste_fabricacion_estandar" value={currentProduct.coste_fabricacion_estandar} onChange={handleProductChange} readOnly title="Calculado automáticamente por las recetas y procesos" /></label>
-            <label>Margen Venta (%): <input type="number" step="0.01" name="margen_venta_default" value={currentProduct.margen_venta_default} onChange={handleProductChange} /></label>
-            <label>Precio Sugerido: <input type="number" step="0.01" name="precio_venta_sugerido" value={currentProduct.precio_venta_sugerido} onChange={handleProductChange} /></label>
-            <label>Coste Extra Unitario (€): <input type="number" step="0.01" name="coste_extra_unitario" value={currentProduct.coste_extra_unitario} onChange={handleProductChange} /></label> {/* Nuevo campo */}
+            {/* Unidad de medida ahora es fija a "unidad" para productos terminados */}
+            <label>Unidad Medida: <input type="text" name="unidad_medida" value="unidad" readOnly /></label>
+            
+            {/* Campos de Coste, Margen y Precio Sugerido ahora son solo visualización o se gestionan en otro lugar */}
+            <label>Coste Estándar: <input type="number" step="0.0001" name="coste_fabricacion_estandar" value={currentProduct.coste_fabricacion_estandar} readOnly title="Calculado automáticamente por las recetas y procesos" /></label>
+            {/* <label>Margen Venta (%): <input type="number" step="0.01" name="margen_venta_default" value={currentProduct.margen_venta_default} onChange={handleProductChange} /></label> */}
+            {/* <label>Precio Sugerido: <input type="number" step="0.01" name="precio_venta_sugerido" value={currentProduct.precio_venta_sugerido} onChange={handleProductChange} /></label> */}
+            {/* <label>Coste Extra Unitario (€): <input type="number" step="0.01" name="coste_extra_unitario" value={currentProduct.coste_extra_unitario} onChange={handleProductChange} /></label> */}
+            
             <label>Estado:
               <select name="status" value={currentProduct.status} onChange={handleProductChange}>
                 <option value="ACTIVO">ACTIVO</option>
@@ -526,9 +475,9 @@ function GestionProductosRecetas() {
                 <th>Nombre</th>
                 <th>Unidad</th>
                 <th>Coste Estándar (€)</th>
-                <th>Margen (%)</th>
+                {/* <th>Margen (%)</th>
                 <th>Precio Sugerido (€)</th>
-                <th>Coste Extra (€)</th> {/* Nuevo campo */}
+                <th>Coste Extra (€)</th> */}
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
@@ -541,9 +490,9 @@ function GestionProductosRecetas() {
                   <td>{prod.nombre}</td>
                   <td>{prod.unidad_medida}</td>
                   <td>{parseFloat(prod.coste_fabricacion_estandar || 0).toFixed(4)}</td>
-                  <td>{(parseFloat(prod.margen_venta_default || 0) * 100).toFixed(2)}%</td>
+                  {/* <td>{(parseFloat(prod.margen_venta_default || 0) * 100).toFixed(2)}%</td>
                   <td>{parseFloat(prod.precio_venta_sugerido || 0).toFixed(2)}</td>
-                  <td>{parseFloat(prod.coste_extra_unitario || 0).toFixed(2)}</td> {/* Mostrar nuevo campo */}
+                  <td>{parseFloat(prod.coste_extra_unitario || 0).toFixed(2)}</td> */}
                   <td>{prod.status}</td>
                   <td>
                     <button onClick={() => handleEditProduct(prod)} className="action-button empezada">Editar</button>
@@ -574,70 +523,61 @@ function GestionProductosRecetas() {
                 <input type="hidden" name="producto_terminado_id" value={currentReceta.producto_terminado_id} />
               </label>
 
-              {/* Selector de Material o Componente */}
-              <label>Material o Componente:
+              {/* Selector de Tipo de Material/Componente */}
+              <label>Tipo de Material/Componente:
                 <select
-                  name="material_or_component_type" // Nuevo nombre para evitar conflicto
-                  value={currentReceta.material_id ? 'material' : (currentReceta.componente_id ? 'componente' : '')}
-                  onChange={(e) => {
-                    const type = e.target.value;
-                    setCurrentReceta(prev => ({
-                      ...prev,
-                      material_id: type === 'material' ? (editModeReceta ? prev.material_id : '') : '',
-                      componente_id: type === 'componente' ? (editModeReceta ? prev.componente_id : '') : '',
-                      // Limpiar campos de display al cambiar de tipo
-                      display_material_ref: '',
-                      display_material_type: '',
-                      display_material_espesor: '',
-                      display_material_ancho: '',
-                      display_material_color: '',
-                      display_material_unidad: '',
-                      display_material_descripcion: '',
-                    }));
-                  }}
+                  name="material_or_component_type_selector"
+                  value={currentReceta.material_or_component_type_selector}
+                  onChange={handleMaterialOrComponentTypeChange}
                   required
                 >
                   <option value="">Seleccione tipo</option>
-                  <option value="material">Materia Prima</option>
+                  <option value="materia_prima">Materia Prima (Bobina)</option>
                   <option value="componente">Componente</option>
                 </select>
               </label>
 
-              {/* Selector de Materia Prima */}
-              {(currentReceta.material_id || (currentReceta.material_id === '' && currentReceta.componente_id === '' && (currentReceta.material_or_component_type === 'material' || (!editModeReceta && !currentReceta.componente_id)))) && (
-                <label>Materia Prima:
-                  <select name="material_id" value={currentReceta.material_id} onChange={handleMaterialOrComponentSelect} required={!currentReceta.componente_id}>
-                    <option value="">Seleccione Materia Prima</option>
-                    {materiasPrimas.map(mp => (
-                      <option key={mp.id} value={mp.id}>{mp.referencia_stock} ({mp.material_tipo} {mp.espesor || ''} {mp.ancho || ''}mm)</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              {/* Selector de Componente */}
-              {(currentReceta.componente_id || (currentReceta.material_id === '' && currentReceta.componente_id === '' && (currentReceta.material_or_component_type === 'componente' || (!editModeReceta && !currentReceta.material_id)))) && (
-                <label>Componente:
-                  <select name="componente_id" value={currentReceta.componente_id} onChange={handleMaterialOrComponentSelect} required={!currentReceta.material_id}>
-                    <option value="">Seleccione Componente</option>
-                    {componentes.map(comp => (
-                      <option key={comp.id} value={comp.id}>{comp.componente_ref} ({comp.descripcion})</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              {/* Mostrar detalles del material/componente seleccionado */}
-              {(currentReceta.display_material_ref || currentReceta.display_material_type) && (
+              {/* Campos para Materia Prima Genérica */}
+              {currentReceta.material_or_component_type_selector === 'materia_prima' && (
                 <>
-                  <label>Ref. Seleccionada: <input type="text" value={currentReceta.display_material_ref} readOnly /></label>
-                  <label>Tipo: <input type="text" value={currentReceta.display_material_type} readOnly /></label>
-                  {currentReceta.display_material_espesor && <label>Espesor/Desc: <input type="text" value={currentReceta.display_material_espesor} readOnly /></label>}
-                  {currentReceta.display_material_ancho && <label>Ancho: <input type="text" value={currentReceta.display_material_ancho} readOnly /></label>}
-                  {currentReceta.display_material_color && <label>Color: <input type="text" value={currentReceta.display_material_color} readOnly /></label>}
-                  {currentReceta.display_material_unidad && <label>Unidad: <input type="text" value={currentReceta.display_material_unidad} readOnly /></label>}
+                  <label>Tipo Material:
+                    <select name="material_tipo_generico" value={currentReceta.material_tipo_generico} onChange={handleRecetaChange} required>
+                      <option value="">Seleccione Tipo</option>
+                      {/* Asumiendo que estos son los tipos de material de tus bobinas */}
+                      {["GOMA", "PVC", "FIELTRO"].map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>Subtipo Material: <input type="text" name="subtipo_material_generico" value={currentReceta.subtipo_material_generico} onChange={handleRecetaChange} /></label>
+                  <label>Espesor: <input type="text" name="espesor_generico" value={currentReceta.espesor_generico} onChange={handleRecetaChange} /></label>
+                  <label>Ancho (mm): <input type="number" step="0.01" name="ancho_generico" value={currentReceta.ancho_generico} onChange={handleRecetaChange} /></label>
+                  <label>Color: <input type="text" name="color_generico" value={currentReceta.color_generico} onChange={handleRecetaChange} /></label>
                 </>
               )}
+
+              {/* Campo para Componente Genérico */}
+              {currentReceta.material_or_component_type_selector === 'componente' && (
+                <label>Referencia Componente:
+                  <select name="componente_ref_generico" value={currentReceta.componente_ref_generico} onChange={handleRecetaChange} required>
+                    <option value="">Seleccione Componente</option>
+                    {materialesGenericos.filter(m => m.type === 'componente').map(comp => (
+                      <option key={comp.componente_ref} value={comp.componente_ref}>{comp.componente_ref} ({comp.descripcion})</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              
+              {/* Campos de cantidad y peso */}
+              <label>Cantidad Requerida: <input type="number" step="0.01" name="cantidad_requerida" value={currentReceta.cantidad_requerida} onChange={handleRecetaChange} required /></label>
+              <label>Unidad Medida Requerida: <input type="text" name="unidad_medida_requerida" value={currentReceta.unidad_medida_requerida} onChange={handleRecetaChange} required /></label>
+              
+              {/* Campo para unidades_por_ancho_material, solo si es materia prima */}
+              {currentReceta.material_or_component_type_selector === 'materia_prima' && (
+                <label>Unidades por Ancho (material): <input type="number" step="0.01" name="unidades_por_ancho_material" value={currentReceta.unidades_por_ancho_material} onChange={handleRecetaChange} placeholder="Ej: 2 (si caben 2 al ancho)" /></label>
+              )}
+
+              <label>Peso por Unidad de Producto (kg): <input type="number" step="0.0001" name="peso_por_unidad_producto" value={currentReceta.peso_por_unidad_producto} onChange={handleRecetaChange} placeholder="Ej: 0.015 (15 gramos)" /></label>
 
               <label>Notas: <textarea name="notas" value={currentReceta.notas} onChange={handleRecetaChange}></textarea></label>
             </div>
@@ -655,7 +595,11 @@ function GestionProductosRecetas() {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Material/Componente</th>
+                  <th>Material/Componente Genérico</th> {/* CAMBIADO */}
+                  <th>Cantidad Req.</th>
+                  <th>Unidad Req.</th>
+                  <th>Unid. por Ancho</th>
+                  <th>Peso por PT (kg)</th>
                   <th>Notas</th>
                   <th>Acciones</th>
                 </tr>
@@ -665,9 +609,15 @@ function GestionProductosRecetas() {
                   <tr key={rec.id}>
                     <td>{rec.id}</td>
                     <td>
-                      {rec.material_id ? `${rec.material_referencia_stock} (${rec.material_tipo} ${rec.material_espesor || ''} ${rec.material_ancho || ''}mm)` : ''}
-                      {rec.componente_id ? `${rec.componente_referencia_stock} (${rec.componente_descripcion || ''})` : ''}
+                      {rec.material_tipo_generico ? 
+                        `${rec.material_tipo_generico} ${rec.subtipo_material_generico || ''} ${rec.espesor_generico || ''} ${rec.ancho_generico || ''}mm ${rec.color_generico || ''}`.trim() : 
+                        rec.componente_ref_generico
+                      }
                     </td>
+                    <td>{parseFloat(rec.cantidad_requerida).toFixed(2)}</td>
+                    <td>{rec.unidad_medida_requerida}</td>
+                    <td>{rec.unidades_por_ancho_material !== null ? parseFloat(rec.unidades_por_ancho_material).toFixed(0) : '-'}</td>
+                    <td>{rec.peso_por_unidad_producto !== null ? parseFloat(rec.peso_por_unidad_producto).toFixed(4) : '-'}</td>
                     <td>{rec.notas || '-'}</td>
                     <td>
                       <button onClick={() => handleEditReceta(rec)} className="action-button empezada">Editar</button>

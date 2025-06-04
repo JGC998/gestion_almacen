@@ -15,9 +15,17 @@ function GestionProcesosFabricacion() {
     producto_terminado_id: '',
     maquinaria_id: '',
     nombre_proceso: '',
-    tiempo_estimado_horas: ''
-    // coste_mano_obra_hora se elimina
+    tiempo_estimado_horas: '',
+    aplica_a_clientes: 'ALL' // NUEVO CAMPO: Por defecto 'ALL'
   });
+
+  const tiposClienteProceso = [
+    { value: 'ALL', label: 'Todos los Clientes' },
+    { value: 'FINAL', label: 'Cliente Final' },
+    { value: 'FABRICANTE', label: 'Fabricante' },
+    { value: 'METRAJES', label: 'Metrajes' },
+    { value: 'INTERMEDIARIO', label: 'Intermediario' },
+  ];
 
   const fetchDependencies = useCallback(async () => {
     try {
@@ -73,7 +81,7 @@ function GestionProcesosFabricacion() {
     setCurrentProceso({
       ...proceso,
       tiempo_estimado_horas: parseFloat(proceso.tiempo_estimado_horas).toFixed(2),
-      // coste_mano_obra_hora se elimina
+      aplica_a_clientes: proceso.aplica_a_clientes || 'ALL', // Asegurar valor por defecto
     });
     setEditMode(true);
     setSuccessMessage('');
@@ -98,7 +106,6 @@ function GestionProcesosFabricacion() {
       }
       setSuccessMessage(data.mensaje);
       fetchProcesos();
-      // Opcional: Recalcular coste del producto terminado afectado
     } catch (err) {
       console.error("Error al eliminar proceso:", err);
       setError(err.message);
@@ -118,7 +125,7 @@ function GestionProcesosFabricacion() {
       producto_terminado_id: parseInt(currentProceso.producto_terminado_id),
       maquinaria_id: parseInt(currentProceso.maquinaria_id),
       tiempo_estimado_horas: parseFloat(currentProceso.tiempo_estimado_horas),
-      // coste_mano_obra_hora se elimina
+      aplica_a_clientes: currentProceso.aplica_a_clientes, // Incluir el nuevo campo
     };
 
     const method = editMode ? 'PUT' : 'POST';
@@ -140,7 +147,6 @@ function GestionProcesosFabricacion() {
       setSuccessMessage(data.mensaje || `Proceso ${editMode ? 'actualizado' : 'creado'} con éxito.`);
       resetForm();
       fetchProcesos();
-      // Opcional: Recalcular coste del producto terminado afectado
     } catch (err) {
       console.error("Error al guardar proceso:", err);
       setError(err.message);
@@ -156,8 +162,8 @@ function GestionProcesosFabricacion() {
       producto_terminado_id: '',
       maquinaria_id: '',
       nombre_proceso: '',
-      tiempo_estimado_horas: ''
-      // coste_mano_obra_hora se elimina
+      tiempo_estimado_horas: '',
+      aplica_a_clientes: 'ALL' // Resetear a valor por defecto
     });
     setSuccessMessage('');
     setError(null);
@@ -191,7 +197,16 @@ function GestionProcesosFabricacion() {
           </label>
           <label>Nombre Proceso: <input type="text" name="nombre_proceso" value={currentProceso.nombre_proceso} onChange={handleChange} required /></label>
           <label>Tiempo Estimado (Horas): <input type="number" step="0.01" name="tiempo_estimado_horas" value={currentProceso.tiempo_estimado_horas} onChange={handleChange} required /></label>
-          {/* coste_mano_obra_hora se elimina del formulario */}
+          
+          {/* NUEVO CAMPO: Aplica a Clientes */}
+          <label>Aplica a Clientes:
+            <select name="aplica_a_clientes" value={currentProceso.aplica_a_clientes} onChange={handleChange} required>
+              {tiposClienteProceso.map(tipo => (
+                <option key={tipo.value} value={tipo.value}>{tipo.label}</option>
+              ))}
+            </select>
+          </label>
+
         </div>
         <button type="submit" disabled={loading} className="submit-btn">
           {loading ? 'Guardando...' : (editMode ? 'Actualizar Proceso' : 'Crear Proceso')}
@@ -211,7 +226,7 @@ function GestionProcesosFabricacion() {
               <th>Maquinaria</th>
               <th>Proceso</th>
               <th>Tiempo Est. (h)</th>
-              {/* Coste MO (€/h) se elimina de la tabla */}
+              <th>Aplica a Clientes</th> {/* NUEVA COLUMNA */}
               <th>Acciones</th>
             </tr>
           </thead>
@@ -223,7 +238,7 @@ function GestionProcesosFabricacion() {
                 <td>{proc.maquinaria_nombre}</td>
                 <td>{proc.nombre_proceso}</td>
                 <td>{parseFloat(proc.tiempo_estimado_horas).toFixed(2)}</td>
-                {/* Coste MO (€/h) se elimina de la visualización */}
+                <td>{proc.aplica_a_clientes || 'ALL'}</td> {/* Mostrar el nuevo campo */}
                 <td>
                   <button onClick={() => handleEdit(proc)} className="action-button empezada">Editar</button>
                   <button onClick={() => handleDelete(proc.id)} className="action-button agotada" style={{backgroundColor: '#dc3545'}}>Eliminar</button>

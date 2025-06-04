@@ -24,9 +24,9 @@ function TarifaVenta() {
 
     setLoading(true);
     setError(null);
-    // Cambiado el query param a tipo_tarifa
+    // Cambiado el endpoint para obtener la tarifa de productos terminados
     const apiUrl = `http://localhost:5002/api/tarifa-venta?tipo_tarifa=${selectedTipoTarifa}`;
-    console.log("Llamando a API para tarifa de venta:", apiUrl);
+    console.log("Llamando a API para tarifa de venta de Productos Terminados:", apiUrl);
 
     try {
       const response = await fetch(apiUrl);
@@ -56,11 +56,11 @@ function TarifaVenta() {
 
   return (
     <div className="tarifa-venta-container">
-      <h2>Tarifa de Venta</h2>
+      <h2>Tarifa de Venta de Productos Terminados</h2> {/* Título actualizado */}
 
       <div className="filtros-container" style={{ maxWidth: '400px', marginBottom: '20px' }}>
         <div className="filtro-item">
-          <label htmlFor="tipoTarifa">Seleccionar Tipo de Tarifa:</label> {/* Cambiado el label */}
+          <label htmlFor="tipoTarifa">Seleccionar Tipo de Tarifa:</label>
           <select
             id="tipoTarifa"
             value={selectedTipoTarifa}
@@ -77,7 +77,7 @@ function TarifaVenta() {
       {error && <p className="error-backend">Error al generar tarifa: {error}</p>}
 
       {!loading && !error && selectedTipoTarifa && tarifaData.length === 0 && (
-        <p>No hay datos de tarifa para mostrar para el tipo de tarifa seleccionado (o no hay stock base para calcularla).</p>
+        <p>No hay datos de tarifa para mostrar para el tipo de tarifa seleccionado (o no hay productos terminados activos para calcularla).</p>
       )}
       {!loading && !error && !selectedTipoTarifa && (
         <p>Por favor, seleccione un tipo de tarifa para verla.</p>
@@ -87,25 +87,23 @@ function TarifaVenta() {
         <table>
           <thead>
             <tr>
-              <th>Material</th>
-              <th>Subtipo</th>
-              <th>Espesor</th>
-              <th>Ancho (mm)</th> {/* Nuevo campo */}
-              <th>Precio ML antes margen (€)</th> {/* Nuevo campo */}
+              <th>Referencia Producto</th> {/* Nuevo campo */}
+              <th>Nombre Producto</th> {/* Nuevo campo */}
+              <th>Unidad</th> {/* Nuevo campo */}
+              <th>Coste Base Fabricación (€)</th> {/* Nuevo campo */}
               <th>Margen (%)</th>
-              <th>Precio Venta aplicado margen (€)</th> {/* Nuevo campo */}
+              <th>Precio Venta aplicado margen (€)</th>
             </tr>
           </thead>
           <tbody>
             {tarifaData.map((item, index) => (
-              <tr key={`${item.material_tipo}-${item.subtipo_material}-${item.espesor}-${item.ancho}-${index}`}> {/* Clave más robusta */}
-                <td>{item.material_tipo}</td>
-                <td>{item.subtipo_material}</td>
-                <td>{item.espesor}</td>
-                <td>{item.ancho !== null && item.ancho !== undefined ? parseFloat(item.ancho).toFixed(0) : '-'}</td> {/* Mostrar ancho */}
-                <td>{item.precio_metro_lineal_antes_margen.toFixed(4)}</td> {/* Mostrar nuevo campo */}
+              <tr key={`${item.producto_referencia}-${index}`}> {/* Clave más robusta */}
+                <td>{item.producto_referencia}</td>
+                <td>{item.producto_nombre}</td>
+                <td>{item.unidad_medida}</td>
+                <td>{item.coste_base_fabricacion.toFixed(4)}</td>
                 <td>{(item.margen_aplicado * 100).toFixed(2)}%</td>
-                <td>{item.precio_venta_aplicado_margen.toFixed(2)}</td> {/* Mostrar nuevo campo */}
+                <td>{item.precio_venta_aplicado_margen.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>

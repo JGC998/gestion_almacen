@@ -25,7 +25,8 @@ function FormularioPedidoNacional() {
       unidad_medida: 'm', // Puede variar por material, o ser fijo 'm'
       moneda_original: 'EUR', // Fijo para nacional
       ubicacion: '',
-      notas_linea: ''
+      notas_linea: '',
+      peso_total_kg: '' // NUEVO CAMPO
     }
   ]);
 
@@ -50,9 +51,6 @@ function FormularioPedidoNacional() {
     const { name, value } = e.target;
     const nuevasLineas = [...lineas];
     nuevasLineas[index][name] = value;
-    // Si el material es FIELTRO, la unidad podría ser m2, o ud. Aquí simplificamos a 'm'.
-    // Podrías ajustar la unidad por defecto o hacerla editable según el material_tipo si es necesario.
-    // nuevasLineas[index]['unidad_medida'] = materialTipo === 'FIELTRO' ? 'm2' : 'm'; 
     setLineas(nuevasLineas);
   };
   
@@ -68,7 +66,7 @@ function FormularioPedidoNacional() {
       temp_id: Date.now(),
       subtipo_material: '', referencia_stock: '', espesor: '', ancho: '', color: '',
       cantidad_original: '', precio_unitario_original: '', unidad_medida: 'm', moneda_original: 'EUR',
-      ubicacion: '', notas_linea: ''
+      ubicacion: '', notas_linea: '', peso_total_kg: '' // NUEVO CAMPO
     }]);
   };
 
@@ -95,7 +93,8 @@ function FormularioPedidoNacional() {
         setError("Todas las líneas deben tener una referencia de stock.");
         setLoading(false); return;
     }
-    // ... (más validaciones como en el formulario original)
+    // Puedes añadir más validaciones aquí si es necesario
+    // Por ejemplo, que peso_total_kg sea un número positivo
 
     const lineasParaEnviar = lineas.map(({ temp_id, ...rest }) => rest);
     const gastosParaEnviar = gastos.map(({ temp_id, ...rest }) => rest);
@@ -104,7 +103,7 @@ function FormularioPedidoNacional() {
       pedido,
       lineas: lineasParaEnviar,
       gastos: gastosParaEnviar,
-      material_tipo: materialTipo // Enviamos el tipo de material seleccionado
+      material_tipo: materialTipo
     };
 
     try {
@@ -116,7 +115,7 @@ function FormularioPedidoNacional() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.detalle || `Error del servidor`);
       setSuccessMessage(`¡Pedido Nacional de ${materialTipo} (ID: ${data.pedidoId}) creado con éxito!`);
-      // Opcional: resetear formulario
+      // Opcional: resetear formulario después de éxito
     } catch (err) {
       setError(err.message);
     } finally {
@@ -167,6 +166,7 @@ function FormularioPedidoNacional() {
               <label>Cantidad ({linea.unidad_medida})*: <input type="number" step="0.01" name="cantidad_original" value={linea.cantidad_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
               <label>Precio Unit. (€/{linea.unidad_medida})*: <input type="number" step="0.01" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
               <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(index, e)} /></label>
+              <label>Peso Total (kg): <input type="number" step="0.01" name="peso_total_kg" value={linea.peso_total_kg} onChange={(e) => handleLineaChange(index, e)} placeholder="Peso de esta bobina/lote" /></label> {/* NUEVO CAMPO */}
             </div>
             <label>Notas Línea: <textarea name="notas_linea" value={linea.notas_linea} onChange={(e) => handleLineaChange(index, e)}></textarea></label>
             {lineas.length > 1 && <button type="button" onClick={() => removeLinea(index)} className="remove-btn">Eliminar</button>}

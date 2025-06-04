@@ -27,7 +27,8 @@ function FormularioPedidoImportacion() {
       moneda_original: 'USD', // Moneda por defecto para importación
       unidad_medida: 'm',
       ubicacion: '',
-      notas_linea: ''
+      notas_linea: '',
+      peso_total_kg: '' // NUEVO CAMPO
     }
   ]);
 
@@ -70,7 +71,7 @@ function FormularioPedidoImportacion() {
       temp_id: Date.now(),
       subtipo_material: '', referencia_stock: '', espesor: '', ancho: '', color: '',
       cantidad_original: '', precio_unitario_original: '', moneda_original: 'USD', unidad_medida: 'm',
-      ubicacion: '', notas_linea: ''
+      ubicacion: '', notas_linea: '', peso_total_kg: '' // NUEVO CAMPO
     }]);
   };
 
@@ -97,7 +98,12 @@ function FormularioPedidoImportacion() {
         setError("El valor de conversión es obligatorio y debe ser un número positivo.");
         setLoading(false); return;
     }
-    // ... (más validaciones)
+    if (lineas.some(l => !l.referencia_stock.trim())) {
+        setError("Todas las líneas deben tener una referencia de stock.");
+        setLoading(false); return;
+    }
+    // Puedes añadir más validaciones aquí si es necesario
+    // Por ejemplo, que peso_total_kg sea un número positivo
 
     const lineasParaEnviar = lineas.map(({ temp_id, ...rest }) => rest);
     const gastosParaEnviar = gastos.map(({ temp_id, ...rest }) => rest);
@@ -119,7 +125,7 @@ function FormularioPedidoImportacion() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.detalle || `Error del servidor`);
       setSuccessMessage(`¡Pedido de Importación de ${materialTipo} (ID: ${data.pedidoId}) creado con éxito!`);
-      // Opcional: resetear formulario
+      // Opcional: resetear formulario después de éxito
     } catch (err) {
       setError(err.message);
     } finally {
@@ -170,7 +176,7 @@ function FormularioPedidoImportacion() {
         {lineas.map((linea, index) => (
           <fieldset key={linea.temp_id} className="linea-item">
             <legend>Línea {index + 1}</legend>
-            <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))'}}> {/* Ajuste para más campos */}
+            <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))'}}>
               <label>Ref. Stock*: <input type="text" name="referencia_stock" value={linea.referencia_stock} onChange={(e) => handleLineaChange(index, e)} required /></label>
               <label>Subtipo Material: <input type="text" name="subtipo_material" value={linea.subtipo_material} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Espesor: <input type="text" name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(index, e)} /></label>
@@ -181,11 +187,11 @@ function FormularioPedidoImportacion() {
                 <select name="moneda_original" value={linea.moneda_original} onChange={(e) => handleLineaChange(index, e)}>
                   <option value="USD">USD</option>
                   <option value="EUR">EUR</option>
-                  {/* Añadir más monedas si es necesario */}
                 </select>
               </label>
               <label>Precio Unit. ({linea.moneda_original}/{linea.unidad_medida})*: <input type="number" step="0.0001" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
               <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(index, e)} /></label>
+              <label>Peso Total (kg): <input type="number" step="0.01" name="peso_total_kg" value={linea.peso_total_kg} onChange={(e) => handleLineaChange(index, e)} placeholder="Peso de esta bobina/lote" /></label> {/* NUEVO CAMPO */}
             </div>
             <label>Notas Línea: <textarea name="notas_linea" value={linea.notas_linea} onChange={(e) => handleLineaChange(index, e)}></textarea></label>
             {lineas.length > 1 && <button type="button" onClick={() => removeLinea(index)} className="remove-btn">Eliminar</button>}
