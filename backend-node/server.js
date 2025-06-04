@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
-const fs = require('fs'); // Para crear el directorio si no existe
+const fs = require('fs'); // Para leer el archivo config.json y crear el directorio si no existe
 
 // --- Importar funciones de db_operations.js ---
 const {
@@ -13,7 +13,7 @@ const {
     obtenerDetallesCompletosPedido,
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
-    obtenerConfiguraciones,
+    // REMOVIDA: obtenerConfiguraciones, // Ya no se importa desde db_operations
 
     // Nuevas importaciones para la Fase 5
     insertarProductoTerminado,
@@ -53,12 +53,36 @@ const {
     actualizarStockProductoTerminado,
     eliminarStockProductoTerminado,
 
-    actualizarCosteFabricacionEstandar // Para recalcular el coste estándar
+    actualizarCosteFabricacionEstandar, // Para recalcular el coste estándar
+
+    consultarReferenciasStockConUltimoCoste // Nueva importación
 } = require('./db_operations.js');
 
 
 const app = express();
 const PORT = process.env.PORT || 5002;
+
+// --- Cargar configuraciones desde config.json ---
+let appConfig = {};
+try {
+    const configPath = path.resolve(__dirname, 'config.json');
+    const configFile = fs.readFileSync(configPath, 'utf8');
+    appConfig = JSON.parse(configFile);
+    console.log("Configuraciones cargadas desde config.json:", appConfig);
+} catch (error) {
+    console.error("Error al cargar config.json. Asegúrate de que el archivo existe y es válido.", error.message);
+    // Establecer valores por defecto si el archivo no se puede cargar
+    appConfig = {
+        margen_default_final: 0.50,
+        margen_default_fabricante: 0.30,
+        margen_default_metrajes: 0.60,
+        margen_default_intermediario: 0.20, // Nuevo margen por defecto
+        coste_mano_obra_default: 20.00,
+        coste_mano_obra_por_metro_metraje: 0.15 // Nuevo coste por defecto
+    };
+    console.warn("Usando configuraciones por defecto.");
+}
+
 
 // Middlewares
 app.use(cors());
@@ -177,20 +201,8 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla StockComponentes verificada/creada.");
         });
 
-        db.run(`CREATE TABLE IF NOT EXISTS Configuracion (
-            clave TEXT PRIMARY KEY,
-            valor TEXT
-        )`, (err) => {
-            if (err) console.error("Error creando tabla Configuracion:", err.message);
-            else {
-                console.log("Tabla Configuracion verificada/creada.");
-                // Insertar valores por defecto si no existen
-                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_final', '0.50']);
-                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_fabricante', '0.30']);
-                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_metrajes', '0.60']);
-                db.run(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['coste_mano_obra_default', '20.00']); // Nuevo valor por defecto
-            }
-        });
+        // REMOVIDA: Tabla Configuracion
+        // db.run(`CREATE TABLE IF NOT EXISTS Configuracion ( ... )`)
 
         // --- NUEVAS TABLAS PARA LA FASE 5 ---
 
@@ -203,6 +215,7 @@ function crearTablasSiNoExisten() {
             coste_fabricacion_estandar REAL,
             margen_venta_default REAL,
             precio_venta_sugerido REAL,
+            coste_extra_unitario REAL, -- Añadido coste_extra_unitario
             fecha_creacion TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK(status IN ('ACTIVO', 'DESCATALOGADO', 'OBSOLETO'))
         )`, (err) => {
@@ -366,7 +379,7 @@ app.get('/api/pedidos/:pedidoId/detalles', async (req, res) => {
     }
 
     try {
-        const detallesPedido = await obtenerDetallesCompletosPedido(pedidoId);
+        const detallesPedido = await obtenerDetallesCompletosPedido(pedidoId); // Esta función ya usa la lógica de IVA
 
         if (detallesPedido) {
             console.log(`Node.js: Devolviendo detalles para el pedido ID ${pedidoId}.`);
@@ -417,10 +430,8 @@ function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
         : 0;
 
     return lineasConPrecioBase.map(linea => {
-        // Precio por metro lineal en euros (precio_unitario_eur)
-        // (precio metro lineal en dolares * valor de conversion) + 1*(1+porcentaje de gasto repercutible)
-        // La fórmula se aplica al coste unitario ya convertido a EUR, no al total de la línea.
-        // Asumiendo que 'precio_unitario_eur' ya es el precio por metro lineal en EUR
+        // Precio por metro lineal en euros = (precio metro lineal en dolares * valor de conversion) * (1 + porcentaje de gasto repercutible)
+        // Asumiendo que 'precio_unitario_eur' ya es el precio por metro lineal en EUR (si la moneda original no era EUR y se convirtió)
         const costeUnitarioFinalCalculado = linea.precio_unitario_eur * (1 + porcentajeGastosRepercutibles);
 
         return { ...linea, coste_unitario_final_calculado: costeUnitarioFinalCalculado };
@@ -572,7 +583,7 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
 
 
 app.get('/api/tarifa-venta', async (req, res) => {
-    const { tipo_tarifa } = req.query; // Cambiado de tipo_cliente a tipo_tarifa
+    const { tipo_tarifa } = req.query;
 
     console.log(`Node.js: Se ha solicitado GET /api/tarifa-venta para tipo_tarifa: ${tipo_tarifa}`);
 
@@ -581,13 +592,14 @@ app.get('/api/tarifa-venta', async (req, res) => {
     }
     const tipoTarifaNormalizado = tipo_tarifa.toLowerCase();
 
-    const tiposTarifaValidos = ['final', 'fabricante', 'metrajes']; // Mantener los mismos nombres para las claves de configuración
+    const tiposTarifaValidos = ['final', 'fabricante', 'metrajes', 'intermediario']; // Añadido 'intermediario'
     if (!tiposTarifaValidos.includes(tipoTarifaNormalizado)) {
         return res.status(400).json({ error: `Valor de 'tipo_tarifa' no válido. Valores permitidos: ${tiposTarifaValidos.join(', ')}.` });
     }
 
     try {
-        const configuraciones = await obtenerConfiguraciones();
+        // Las configuraciones ahora se obtienen de appConfig
+        const configuraciones = appConfig;
         const todosLosStockItems = await consultarStockMateriasPrimas();
         const stockItemsRelevantes = todosLosStockItems.filter(
             item => item.status === 'DISPONIBLE' || item.status === 'EMPEZADA'
@@ -627,31 +639,36 @@ app.get('/api/tarifa-venta', async (req, res) => {
                 }
             });
 
-            const claveMargenCliente = `margen_default_${tipoTarifaNormalizado}`;
-
-            let margenAplicado = configuraciones[claveMargenCliente];
+            const claveMargen = `margen_default_${tipoTarifaNormalizado}`;
+            let margenAplicado = appConfig[claveMargen]; // Usar appConfig
 
             if (margenAplicado === undefined) {
-                console.warn(`Margen no encontrado para la clave '${claveMargenCliente}'. Usando 0.`);
+                console.warn(`Margen no encontrado para la clave '${claveMargen}'. Usando 0.`);
                 margenAplicado = 0;
             }
 
             margenAplicado = parseFloat(margenAplicado);
             if (isNaN(margenAplicado)) {
-                console.warn(`Margen para '${claveMargenCliente}' no es numérico ('${configuraciones[claveMargenCliente]}'). Usando 0.`);
+                console.warn(`Margen para '${claveMargen}' no es numérico ('${appConfig[claveMargen]}'). Usando 0.`);
                 margenAplicado = 0;
             }
 
-            const precioVenta = maxCost * (1 + margenAplicado);
+            let costeAdicionalMetraje = 0;
+            // Aplicar coste de mano de obra por metro para metrajes si el material es relevante
+            if (tipoTarifaNormalizado === 'metrajes' && ['GOMA', 'PVC', 'FIELTRO'].includes(grupo.material_tipo)) {
+                costeAdicionalMetraje = parseFloat(appConfig.coste_mano_obra_por_metro_metraje || 0);
+            }
+
+            const precioVenta = (maxCost + costeAdicionalMetraje) * (1 + margenAplicado); // Sumar coste adicional antes de margen
 
             tarifaVenta.push({
                 material_tipo: grupo.material_tipo,
                 subtipo_material: grupo.subtipo_material,
                 espesor: grupo.espesor,
-                ancho: grupo.ancho, // Añadir ancho al resultado
-                precio_metro_lineal_antes_margen: parseFloat(maxCost.toFixed(4)), // Nuevo campo
+                ancho: grupo.ancho,
+                precio_metro_lineal_antes_margen: parseFloat(maxCost.toFixed(4)),
                 margen_aplicado: parseFloat(margenAplicado.toFixed(4)),
-                precio_venta_aplicado_margen: parseFloat(precioVenta.toFixed(4)) // Nuevo campo
+                precio_venta_aplicado_margen: parseFloat(precioVenta.toFixed(4))
             });
         }
 
@@ -726,6 +743,8 @@ app.put('/api/productos-terminados/:id', async (req, res) => {
     try {
         const changes = await actualizarProductoTerminado(id, updates);
         if (changes > 0) {
+            // Recalcular coste de fabricación estándar si se actualiza el producto
+            await actualizarCosteFabricacionEstandar(id, appConfig); // Pasar appConfig
             res.json({ mensaje: `Producto terminado ID ${id} actualizado con éxito.` });
         } else {
             res.status(404).json({ error: "Producto terminado no encontrado para actualizar." });
@@ -860,7 +879,7 @@ app.post('/api/recetas', async (req, res) => {
     try {
         const id = await insertarReceta(recetaData);
         // Recalcular coste de fabricación del producto terminado al añadir/actualizar receta
-        await actualizarCosteFabricacionEstandar(recetaData.producto_terminado_id);
+        await actualizarCosteFabricacionEstandar(recetaData.producto_terminado_id, appConfig); // Pasar appConfig
         res.status(201).json({ mensaje: "Receta creada con éxito.", id });
     } catch (error) {
         console.error("Error en POST /api/recetas:", error.message);
@@ -910,11 +929,11 @@ app.put('/api/recetas/:id', async (req, res) => {
         const changes = await actualizarReceta(id, updates);
         // Recalcular coste de fabricación del producto terminado
         if (updates.producto_terminado_id) { // Asegurarse de que el ID del producto esté presente
-            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id);
+            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id, appConfig); // Pasar appConfig
         } else if (changes > 0) { // Si se actualizó y no se cambió el producto, buscar el producto original
             const recetaOriginal = await consultarRecetaPorId(id);
             if (recetaOriginal && recetaOriginal.producto_terminado_id) {
-                await actualizarCosteFabricacionEstandar(recetaOriginal.producto_terminado_id);
+                await actualizarCosteFabricacionEstandar(recetaOriginal.producto_terminado_id, appConfig); // Pasar appConfig
             }
         }
         res.json({ mensaje: `Receta ID ${id} actualizada con éxito.` });
@@ -935,7 +954,7 @@ app.delete('/api/recetas/:id', async (req, res) => {
         const changes = await eliminarReceta(id);
         if (changes > 0) {
             if (receta && receta.producto_terminado_id) {
-                await actualizarCosteFabricacionEstandar(receta.producto_terminado_id); // Recalcular
+                await actualizarCosteFabricacionEstandar(receta.producto_terminado_id, appConfig); // Pasar appConfig
             }
             res.json({ mensaje: `Receta ID ${id} eliminada con éxito.` });
         } else {
@@ -957,9 +976,10 @@ app.post('/api/procesos-fabricacion', async (req, res) => {
     try {
         const id = await insertarProcesoFabricacion(procesoData);
         // Recalcular coste de fabricación del producto terminado
-        await actualizarCosteFabricacionEstandar(procesoData.producto_terminado_id);
+        await actualizarCosteFabricacionEstandar(procesoData.producto_terminado_id, appConfig); // Pasar appConfig
         res.status(201).json({ mensaje: "Proceso de fabricación creado con éxito.", id });
-    } catch (error) {
+    }
+    catch (error) {
         console.error("Error en POST /api/procesos-fabricacion:", error.message);
         res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
     }
@@ -1006,11 +1026,11 @@ app.put('/api/procesos-fabricacion/:id', async (req, res) => {
     try {
         const changes = await actualizarProcesoFabricacion(id, updates);
         if (updates.producto_terminado_id) { // Asegurarse de que el ID del producto esté presente
-            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id);
+            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id, appConfig); // Pasar appConfig
         } else if (changes > 0) { // Si se actualizó y no se cambió el producto, buscar el producto original
             const procesoOriginal = await consultarProcesoFabricacionPorId(id);
             if (procesoOriginal && procesoOriginal.producto_terminado_id) {
-                await actualizarCosteFabricacionEstandar(procesoOriginal.producto_terminado_id);
+                await actualizarCosteFabricacionEstandar(procesoOriginal.producto_terminado_id, appConfig); // Pasar appConfig
             }
         }
         res.json({ mensaje: `Proceso de fabricación ID ${id} actualizado con éxito.` });
@@ -1031,7 +1051,7 @@ app.delete('/api/procesos-fabricacion/:id', async (req, res) => {
         const changes = await eliminarProcesoFabricacion(id);
         if (changes > 0) {
             if (proceso && proceso.producto_terminado_id) {
-                await actualizarCosteFabricacionEstandar(proceso.producto_terminado_id);
+                await actualizarCosteFabricacionEstandar(proceso.producto_terminado_id, appConfig); // Pasar appConfig
             }
             res.json({ mensaje: `Proceso de fabricación ID ${id} eliminado con éxito.` });
         } else {
@@ -1133,7 +1153,7 @@ app.post('/api/ordenes-produccion/:id/procesar', async (req, res) => {
         return res.status(400).json({ error: "ID de orden de producción no válido." });
     }
     try {
-        const resultado = await procesarOrdenProduccion(ordenId);
+        const resultado = await procesarOrdenProduccion(ordenId, appConfig); // Pasar appConfig
         res.status(200).json(resultado);
     } catch (error) {
         console.error(`Error procesando orden de producción ID ${ordenId}:`, error.message);
@@ -1170,6 +1190,18 @@ app.delete('/api/stock-productos-terminados/:id', async (req, res) => {
     } catch (error) {
         console.error("Error en DELETE /api/stock-productos-terminados/:id:", error.message);
         res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+// --- NUEVO ENDPOINT para referencias de stock con último coste ---
+app.get('/api/stock-referencias-ultimocoste', async (req, res) => {
+    console.log('Node.js: Se ha solicitado GET /api/stock-referencias-ultimocoste');
+    try {
+        const referencias = await consultarReferenciasStockConUltimoCoste();
+        res.json(referencias);
+    } catch (error) {
+        console.error("Error en GET /api/stock-referencias-ultimocoste:", error.message);
+        res.status(500).json({ error: "Error interno del servidor al obtener referencias de stock.", detalle: error.message });
     }
 });
 

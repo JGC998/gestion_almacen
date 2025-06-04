@@ -26,14 +26,8 @@ function runAsync(sql, params = []) {
     });
 }
 
-async function seedConfiguracion() {
-    console.log("Sembrando datos de configuración (márgenes)...");
-    await runAsync(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_final', '0.50']); // Ejemplo 50%
-    await runAsync(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_fabricante', '0.30']); // Ejemplo 30%
-    await runAsync(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['margen_default_metrajes', '0.60']); // Ejemplo 60%
-    await runAsync(`INSERT OR IGNORE INTO Configuracion (clave, valor) VALUES (?, ?)`, ['coste_mano_obra_default', '20.00']); // Nuevo valor por defecto
-    console.log("Datos de configuración (márgenes) sembrados/verificados.");
-}
+// REMOVIDA: La función seedConfiguracion ya no es necesaria,
+// ya que la configuración se gestiona en config.json.
 
 async function seedData() {
     try {
@@ -41,6 +35,7 @@ async function seedData() {
         await runAsync('BEGIN TRANSACTION;');
 
         // --- LIMPIAR TABLAS EXISTENTES (¡Solo para desarrollo!) ---
+        // Limpiar en el orden inverso de dependencias para evitar errores de FK
         await runAsync('DELETE FROM StockProductosTerminados;');
         await runAsync('DELETE FROM OrdenesProduccion;');
         await runAsync('DELETE FROM ProcesosFabricacion;');
@@ -48,16 +43,12 @@ async function seedData() {
         await runAsync('DELETE FROM Maquinaria;');
         await runAsync('DELETE FROM ProductosTerminados;');
         await runAsync('DELETE FROM StockMateriasPrimas;');
-        await runAsync('DELETE FROM StockComponentes;'); // Si tienes componentes, limpia aquí
+        await runAsync('DELETE FROM StockComponentes;');
         await runAsync('DELETE FROM GastosPedido;');
         await runAsync('DELETE FROM LineasPedido;');
         await runAsync('DELETE FROM PedidosProveedores;');
-        await runAsync('DELETE FROM Configuracion;'); // Para re-sembrar márgenes si es necesario
+        // REMOVIDA: DELETE FROM Configuracion; ya que la tabla se elimina del esquema
         console.log("Tablas limpiadas.");
-
-        // Re-sembrar configuracion (asegurarse de que los valores por defecto estén ahí)
-        await seedConfiguracion();
-
 
         // --- Pedido 1: Nacional PVC ---
         let result = await runAsync(
@@ -162,15 +153,22 @@ async function seedData() {
         console.log(`Componentes de ejemplo creados.`);
 
         // --- Productos Terminados de Ejemplo ---
+        // Añadido coste_extra_unitario
         const prod1_id = (await runAsync(
-            `INSERT INTO ProductosTerminados (referencia, nombre, descripcion, unidad_medida, fecha_creacion, status)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['PROD-GOM-001', 'Junta EPDM 3mm', 'Junta de estanqueidad de EPDM 3mm', 'unidad', '2025-06-01', 'ACTIVO']
-        )).lastID;
+            `INSERT INTO ProductosTerminados (referencia, nombre, descripcion, unidad_medida, coste_extra_unitario, fecha_creacion, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ['PROD-GOM-001', 'Junta EPDM 3mm', 'Junta de estanqueidad de EPDM 3mm', 'unidad', 0.05, '2025-06-01', 'ACTIVO']
+        )).lastID; // Coste extra de 0.05€ por unidad
         const prod2_id = (await runAsync(
-            `INSERT INTO ProductosTerminados (referencia, nombre, descripcion, unidad_medida, fecha_creacion, status)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['PROD-PVC-001', 'Lámina PVC Flexible 1.2m', 'Lámina de PVC transparente de 1.2m de ancho', 'm', '2025-06-02', 'ACTIVO']
+            `INSERT INTO ProductosTerminados (referencia, nombre, descripcion, unidad_medida, coste_extra_unitario, fecha_creacion, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ['PROD-PVC-001', 'Lámina PVC Flexible 1.2m', 'Lámina de PVC transparente de 1.2m de ancho', 'm', 0.00, '2025-06-02', 'ACTIVO']
+        )).lastID;
+        // Nuevo producto terminado para probar la selección por referencia de stock
+        const prod_faldeta_id = (await runAsync(
+            `INSERT INTO ProductosTerminados (referencia, nombre, descripcion, unidad_medida, coste_extra_unitario, fecha_creacion, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ['FALDETA-ALDAMA-2MM', 'Faldeta Aldama 2mm', 'Faldeta de goma Aldama de 2mm', 'unidad', 0.02, '2025-06-07', 'ACTIVO']
         )).lastID;
         console.log(`Productos Terminados de ejemplo creados.`);
 
@@ -185,6 +183,11 @@ async function seedData() {
             `INSERT INTO Maquinaria (nombre, descripcion, coste_adquisicion, coste_hora_operacion)
              VALUES (?, ?, ?, ?)`,
             ['Prensa Hidráulica', 'Prensa para moldeado de piezas', 30000, 3.50]
+        )).lastID;
+        const maq3_id = (await runAsync(
+            `INSERT INTO Maquinaria (nombre, descripcion, coste_adquisicion, coste_hora_operacion)
+             VALUES (?, ?, ?, ?)`,
+            ['Máquina de Grabado Láser', 'Máquina para grabar logos en piezas', 15000, 2.00]
         )).lastID;
         console.log(`Maquinaria de ejemplo creada.`);
 
@@ -207,6 +210,12 @@ async function seedData() {
              VALUES (?, ?, ?)`,
             [prod2_id, stock2_id, 'Referencia a PVC-F-1.0-TR']
         );
+        // Receta para 'Faldeta Aldama 2mm' (FALDETA-ALDAMA-2MM)
+        await runAsync(
+            `INSERT INTO Recetas (producto_terminado_id, material_id, notas)
+             VALUES (?, ?, ?)`,
+            [prod_faldeta_id, stock5_id, 'Referencia a FIE-ADH-2-GR (Fieltro)']
+        );
         console.log(`Recetas de ejemplo creadas.`);
 
         // --- Procesos de Fabricación de Ejemplo ---
@@ -228,6 +237,17 @@ async function seedData() {
              VALUES (?, ?, ?, ?)`,
             [prod2_id, maq1_id, 'Corte de Lámina', 0.05]
         );
+        // Proceso para 'Faldeta Aldama 2mm' (FALDETA-ALDAMA-2MM)
+        await runAsync(
+            `INSERT INTO ProcesosFabricacion (producto_terminado_id, maquinaria_id, nombre_proceso, tiempo_estimado_horas)
+             VALUES (?, ?, ?, ?)`,
+            [prod_faldeta_id, maq1_id, 'Troquelado Faldeta', 0.0083] // 30 segundos = 0.0083 horas
+        );
+        await runAsync(
+            `INSERT INTO ProcesosFabricacion (producto_terminado_id, maquinaria_id, nombre_proceso, tiempo_estimado_horas)
+             VALUES (?, ?, ?, ?)`,
+            [prod_faldeta_id, maq3_id, 'Grabado Logo', 0.0083] // 30 segundos = 0.0083 horas
+        );
         console.log(`Procesos de Fabricación de ejemplo creados.`);
 
         // --- Órdenes de Producción de Ejemplo ---
@@ -241,6 +261,11 @@ async function seedData() {
             `INSERT INTO OrdenesProduccion (producto_terminado_id, cantidad_a_producir, fecha, status, observaciones)
              VALUES (?, ?, ?, ?, ?)`,
             [prod2_id, 5, '2025-06-06', 'PENDIENTE', 'Láminas para pedido especial']
+        )).lastID;
+        const op_faldeta_id = (await runAsync(
+            `INSERT INTO OrdenesProduccion (producto_terminado_id, cantidad_a_producir, fecha, status, observaciones)
+             VALUES (?, ?, ?, ?, ?)`,
+            [prod_faldeta_id, 4, '2025-06-08', 'PENDIENTE', 'Faldetas para cliente final']
         )).lastID;
         console.log(`Órdenes de Producción de ejemplo creadas.`);
 

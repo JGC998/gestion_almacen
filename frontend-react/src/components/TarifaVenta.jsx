@@ -13,6 +13,7 @@ function TarifaVenta() {
     { value: 'final', label: 'Tarifa Cliente Final' },
     { value: 'fabricante', label: 'Tarifa Fabricante' },
     { value: 'metrajes', label: 'Tarifa Venta por Metrajes' },
+    { value: 'intermediario', label: 'Tarifa Intermediario' }, // Nuevo tipo de tarifa
   ];
 
   const fetchTarifaVenta = useCallback(async () => {

@@ -1,0 +1,8 @@
+{
+  "margen_default_final": 0.50,
+  "margen_default_fabricante": 0.30,
+  "margen_default_metrajes": 0.60,
+  "margen_default_intermediario": 0.20,
+  "coste_mano_obra_default": 20.00,
+  "coste_mano_obra_por_metro_metraje": 0.15
+}

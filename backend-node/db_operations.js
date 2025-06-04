@@ -563,34 +563,9 @@ async function eliminarPedidoCompleto(pedidoId) {
     }
 }
 
-function obtenerConfiguraciones() {
-    return new Promise((resolve, reject) => {
-        const db = conectarDB();
-        const sql = `SELECT clave, valor FROM Configuracion`;
+// REMOVIDA: function obtenerConfiguraciones()
+// Las configuraciones ahora se cargan desde config.json en server.js y se pasan como parámetro.
 
-        db.all(sql, [], (err, rows) => {
-            db.close();
-            if (err) {
-                console.error("Error al obtener configuraciones:", err.message);
-                return reject(err);
-            }
-            const configuraciones = {};
-            rows.forEach(row => {
-                try {
-                    configuraciones[row.clave] = JSON.parse(row.valor);
-                } catch (e) {
-                    const num = parseFloat(row.valor);
-                    if (!isNaN(num) && isFinite(row.valor)) {
-                        configuraciones[row.clave] = num;
-                    } else {
-                        configuraciones[row.clave] = row.valor;
-                    }
-                }
-            });
-            resolve(configuraciones);
-        });
-    });
-}
 
 // --- NUEVAS FUNCIONES PARA LA FASE 5 ---
 
@@ -601,8 +576,8 @@ async function insertarProductoTerminado(productoData) {
         const result = await runAsync(db, `INSERT INTO ProductosTerminados (
             referencia, nombre, descripcion, unidad_medida,
             coste_fabricacion_estandar, margen_venta_default, precio_venta_sugerido,
-            fecha_creacion, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+            coste_extra_unitario, fecha_creacion, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
             productoData.referencia,
             productoData.nombre,
             productoData.descripcion || null,
@@ -610,6 +585,7 @@ async function insertarProductoTerminado(productoData) {
             parseFloat(productoData.coste_fabricacion_estandar) || 0,
             parseFloat(productoData.margen_venta_default) || 0,
             parseFloat(productoData.precio_venta_sugerido) || 0,
+            parseFloat(productoData.coste_extra_unitario) || 0,
             new Date().toISOString().split('T')[0],
             productoData.status || 'ACTIVO'
         ]);
@@ -674,7 +650,7 @@ async function actualizarProductoTerminado(id, updates) {
             if (updates.hasOwnProperty(key) && key !== 'id') { // No permitimos actualizar el ID
                 setClauses.push(`${key} = ?`);
                 // Asegurar que los valores numéricos se parseen
-                if (['coste_fabricacion_estandar', 'margen_venta_default', 'precio_venta_sugerido'].includes(key)) {
+                if (['coste_fabricacion_estandar', 'margen_venta_default', 'precio_venta_sugerido', 'coste_extra_unitario'].includes(key)) {
                     params.push(parseFloat(updates[key]) || 0);
                 } else {
                     params.push(updates[key]);
@@ -856,7 +832,9 @@ async function consultarRecetas(filtros = {}) {
     try {
         let sql = `SELECT r.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia,
                           sm.referencia_stock AS material_referencia_stock, sm.material_tipo AS material_tipo,
-                          sc.componente_ref AS componente_referencia_stock
+                          sc.componente_ref AS componente_referencia_stock,
+                          sm.espesor AS material_espesor, sm.ancho AS material_ancho, sm.color AS material_color, sm.unidad_medida AS material_unidad_medida,
+                          sc.descripcion AS componente_descripcion, sc.unidad_medida AS componente_unidad_medida
                    FROM Recetas r
                    JOIN ProductosTerminados pt ON r.producto_terminado_id = pt.id
                    LEFT JOIN StockMateriasPrimas sm ON r.material_id = sm.id
@@ -893,7 +871,9 @@ async function consultarRecetaPorId(id) {
     try {
         let sql = `SELECT r.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia,
                           sm.referencia_stock AS material_referencia_stock, sm.material_tipo AS material_tipo,
-                          sc.componente_ref AS componente_referencia_stock
+                          sc.componente_ref AS componente_referencia_stock,
+                          sm.espesor AS material_espesor, sm.ancho AS material_ancho, sm.color AS material_color, sm.unidad_medida AS material_unidad_medida,
+                          sc.descripcion AS componente_descripcion, sc.unidad_medida AS componente_unidad_medida
                    FROM Recetas r
                    JOIN ProductosTerminados pt ON r.producto_terminado_id = pt.id
                    LEFT JOIN StockMateriasPrimas sm ON r.material_id = sm.id
@@ -1330,16 +1310,15 @@ async function calcularCosteMateriales(dbInstance, productoTerminadoId) {
     let costeTotalMateriales = 0;
     for (const receta of recetas) {
         let costeUnitario = 0;
-        // Si no se especifica cantidad requerida en la receta, asumimos 1 para el cálculo del coste estándar
-        // Esto es porque la receta es "teórica" y no tiene cantidad requerida
-        const cantidadTeorica = 1;
+        // Asunción: 1 unidad de material/componente por 1 unidad de producto terminado
+        const cantidadTeoricaParaUnaUnidadProducto = 1; 
 
         if (receta.material_coste_unitario !== null) {
             costeUnitario = parseFloat(receta.material_coste_unitario);
         } else if (receta.componente_coste_unitario !== null) {
             costeUnitario = parseFloat(receta.componente_coste_unitario);
         }
-        costeTotalMateriales += cantidadTeorica * costeUnitario;
+        costeTotalMateriales += cantidadTeoricaParaUnaUnidadProducto * costeUnitario;
     }
     return costeTotalMateriales;
 }
@@ -1348,28 +1327,25 @@ async function calcularCosteMateriales(dbInstance, productoTerminadoId) {
  * Calcula el coste de los procesos de fabricación para un producto terminado.
  * @param {sqlite3.Database} dbInstance - Instancia de la base de datos.
  * @param {number} productoTerminadoId - ID del producto terminado.
+ * @param {object} configuraciones - Objeto con las configuraciones cargadas (ej. coste_mano_obra_default).
  * @returns {Promise<number>} Coste total de procesos (maquinaria + mano de obra).
  */
-async function calcularCosteProcesos(dbInstance, productoTerminadoId) {
+async function calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones) {
     const procesos = await allAsync(dbInstance, `
         SELECT pf.tiempo_estimado_horas,
-               m.coste_hora_operacion, m.depreciacion_hora
+               m.coste_hora_operacion
         FROM ProcesosFabricacion pf
         JOIN Maquinaria m ON pf.maquinaria_id = m.id
         WHERE pf.producto_terminado_id = ?
     `, [productoTerminadoId]);
 
-    const configuraciones = await obtenerConfiguraciones(); // Obtener configuraciones aquí
-    const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0); // Usar default de config
+    const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0);
 
     let costeTotalProcesos = 0;
     for (const proceso of procesos) {
         const tiempoHoras = parseFloat(proceso.tiempo_estimado_horas) || 0;
         const costeMaquinaOperacion = parseFloat(proceso.coste_hora_operacion) || 0;
-        // La depreciación por hora se ha eliminado de la tabla de Maquinaria, así que no se usa aquí.
-        // const costeMaquinaDepreciacion = parseFloat(proceso.depreciacion_hora) || 0;
-
-        // Coste de mano de obra ahora es fijo de configuración, no por proceso
+        
         costeTotalProcesos += tiempoHoras * (costeManoObraDefault + costeMaquinaOperacion);
     }
     return costeTotalProcesos;
@@ -1378,14 +1354,21 @@ async function calcularCosteProcesos(dbInstance, productoTerminadoId) {
 /**
  * Calcula y actualiza el coste de fabricación estándar de un producto terminado.
  * @param {number} productoTerminadoId - ID del producto terminado.
+ * @param {object} configuraciones - Objeto con las configuraciones cargadas (ej. coste_mano_obra_default).
  * @returns {Promise<number>} El coste de fabricación estándar calculado.
  */
-async function actualizarCosteFabricacionEstandar(productoTerminadoId) {
+async function actualizarCosteFabricacionEstandar(productoTerminadoId, configuraciones) {
     const db = conectarDB();
     try {
+        const producto = await getAsync(db, `SELECT coste_extra_unitario FROM ProductosTerminados WHERE id = ?`, [productoTerminadoId]);
+        if (!producto) {
+            throw new Error(`Producto terminado con ID ${productoTerminadoId} no encontrado para calcular coste estándar.`);
+        }
+        const costeExtra = parseFloat(producto.coste_extra_unitario) || 0;
+
         const costeMateriales = await calcularCosteMateriales(db, productoTerminadoId);
-        const costeProcesos = await calcularCosteProcesos(db, productoTerminadoId);
-        const costeTotal = costeMateriales + costeProcesos;
+        const costeProcesos = await calcularCosteProcesos(db, productoTerminadoId, configuraciones); // Pasar configuraciones
+        const costeTotal = costeMateriales + costeProcesos + costeExtra; // Sumar coste extra
 
         await runAsync(db, `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, [costeTotal, productoTerminadoId]);
         console.log(`Coste de fabricación estándar para producto ${productoTerminadoId} actualizado a ${costeTotal}`);
@@ -1403,10 +1386,11 @@ async function actualizarCosteFabricacionEstandar(productoTerminadoId) {
 /**
  * Procesa una Orden de Producción, descontando materiales y añadiendo producto terminado.
  * @param {number} ordenProduccionId - ID de la orden de producción a procesar.
+ * @param {object} configuraciones - Objeto con las configuraciones cargadas.
  * @returns {Promise<object>} Resumen de la operación.
  */
-async function procesarOrdenProduccion(ordenProduccionId) {
-    const db = conectarDB();
+async function procesarOrdenProduccion(ordenProduccionId, configuraciones) {
+    const db = conectarDB(); // Abrir una única conexión para toda la transacción
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
@@ -1442,20 +1426,12 @@ async function procesarOrdenProduccion(ordenProduccionId) {
         let totalCosteMaterialesReal = 0;
         let totalCosteProcesosReal = 0;
 
-        const configuraciones = await obtenerConfiguraciones();
         const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0);
 
         // 1. Verificar stock y calcular coste real de materiales
         for (const receta of recetas) {
-            // Asumimos que la cantidad requerida para la producción real es la cantidad a producir de la OP
-            // multiplicada por el coste unitario del material/componente en stock.
-            // Si la receta es "teórica" sin cantidad, esto es un punto de decisión.
-            // Para que el coste tenga sentido, necesitamos una "cantidad_requerida_por_unidad_de_producto"
-            // en la tabla de Recetas, o asumimos 1 unidad de material por 1 unidad de producto.
-            // Dada la petición de "cantidad requerida tampoco, puesto que siempre va a ser todo mas teorico",
-            // vamos a asumir que para la producción, la cantidad requerida es 1 unidad de material por cada unidad de producto.
-            // Esto es una simplificación y puede necesitar ajuste si las recetas son más complejas.
-            const cantidadNecesariaPorUnidadProducto = 1; // Asunción: 1 unidad de material por 1 unidad de producto
+            // Asunción: 1 unidad de material/componente por 1 unidad de producto terminado
+            const cantidadNecesariaPorUnidadProducto = 1;
             const cantidadTotalNecesaria = cantidadNecesariaPorUnidadProducto * parseFloat(orden.cantidad_a_producir);
 
             let stockActual = 0;
@@ -1472,7 +1448,7 @@ async function procesarOrdenProduccion(ordenProduccionId) {
                 costeUnitarioStock = parseFloat(receta.componente_coste_unitario) || 0;
             } else {
                 console.warn(`Receta ID ${receta.id} no tiene material_id ni componente_id. Ignorando.`);
-                continue; // Saltar esta receta si no apunta a nada
+                continue;
             }
 
             if (stockActual < cantidadTotalNecesaria) {
@@ -1496,7 +1472,7 @@ async function procesarOrdenProduccion(ordenProduccionId) {
         // 3. Calcular coste de procesos (usando el estándar por ahora)
         const procesos = await allAsync(db, `
             SELECT pf.tiempo_estimado_horas,
-                   m.coste_hora_operacion, m.depreciacion_hora
+                   m.coste_hora_operacion
             FROM ProcesosFabricacion pf
             JOIN Maquinaria m ON pf.maquinaria_id = m.id
             WHERE pf.producto_terminado_id = ?
@@ -1511,14 +1487,14 @@ async function procesarOrdenProduccion(ordenProduccionId) {
         totalCosteProcesosReal *= parseFloat(orden.cantidad_a_producir);
 
 
-        const costeFabricacionReal = totalCosteMaterialesReal + totalCosteProcesosReal;
+        const costeFabricacionReal = totalCosteMaterialesReal + totalCosteProcesosReal + (parseFloat(productoTerminado.coste_extra_unitario) || 0) * parseFloat(orden.cantidad_a_producir); // Sumar coste extra del producto
         const costeUnitarioProductoFinal = parseFloat(orden.cantidad_a_producir) > 0
             ? costeFabricacionReal / parseFloat(orden.cantidad_a_producir)
             : 0;
 
         // 4. Insertar producto terminado en StockProductosTerminados
         const stockProductoTerminadoData = {
-            producto_id: orden.producto_terminado_id, // Asegurar que este ID es correcto
+            producto_id: orden.producto_terminado_id,
             orden_produccion_id: orden.id,
             cantidad_actual: parseFloat(orden.cantidad_a_producir),
             unidad_medida: productoTerminado.unidad_medida,
@@ -1528,6 +1504,7 @@ async function procesarOrdenProduccion(ordenProduccionId) {
             ubicacion: 'ALMACEN_PT',
             notas: `Producido por OP ${orden.id}`
         };
+        // ¡Importante! Pasar la instancia 'db' a insertarStockProductoTerminado
         await insertarStockProductoTerminado(db, stockProductoTerminadoData);
         console.log(`Producto terminado ID ${orden.producto_terminado_id} añadido al stock.`);
 
@@ -1551,6 +1528,38 @@ async function procesarOrdenProduccion(ordenProduccionId) {
     }
 }
 
+// --- NUEVA FUNCIÓN: Consultar todas las referencias de StockMateriasPrimas con su último coste ---
+async function consultarReferenciasStockConUltimoCoste() {
+    const db = conectarDB();
+    try {
+        // Esta consulta selecciona la última entrada (por ID, asumiendo que ID es incremental con la fecha)
+        // para cada referencia_stock única.
+        const sql = `
+            SELECT
+                s.id,
+                s.referencia_stock,
+                s.material_tipo,
+                s.subtipo_material,
+                s.espesor,
+                s.ancho,
+                s.color,
+                s.unidad_medida,
+                s.coste_unitario_final,
+                s.fecha_entrada_almacen
+            FROM StockMateriasPrimas s
+            WHERE s.id IN (
+                SELECT MAX(s2.id)
+                FROM StockMateriasPrimas s2
+                GROUP BY s2.referencia_stock
+            )
+            ORDER BY s.referencia_stock;
+        `;
+        return await allAsync(db, sql);
+    } finally {
+        db.close();
+    }
+}
+
 
 // --- EXPORTACIONES ---
 module.exports = {
@@ -1561,7 +1570,7 @@ module.exports = {
     obtenerDetallesCompletosPedido,
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
-    obtenerConfiguraciones,
+    // REMOVIDA: obtenerConfiguraciones,
 
     // Nuevas exportaciones para la Fase 5
     insertarProductoTerminado,
@@ -1601,5 +1610,8 @@ module.exports = {
     actualizarStockProductoTerminado,
     eliminarStockProductoTerminado,
 
-    actualizarCosteFabricacionEstandar // Para recalcular el coste estándar
+    actualizarCosteFabricacionEstandar, // Para recalcular el coste estándar
+
+    // Nueva exportación para obtener referencias de stock con último coste
+    consultarReferenciasStockConUltimoCoste
 };
