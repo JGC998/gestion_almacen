@@ -219,7 +219,7 @@ function crearTablasSiNoExisten() {
         });
 
         // --- NUEVAS TABLAS PARA LA FASE 5 (Revisado con nuevos campos en Recetas) ---
-        db.run(`CREATE TABLE IF NOT EXISTS ProductosTerminados (
+       db.run(`CREATE TABLE IF NOT EXISTS ProductosTerminados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             referencia TEXT NOT NULL UNIQUE,
             nombre TEXT NOT NULL,
@@ -232,44 +232,50 @@ function crearTablasSiNoExisten() {
             fecha_creacion TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK(status IN ('ACTIVO', 'DESCATALOGADO', 'OBSOLETO'))
         )`, (err) => {
-            if (err) console.error("Error creando tabla ProductosTerminados:", err.message);
-            else console.log("Tabla ProductosTerminados verificada/creada.");
-            
-            // --- AÑADIR NUEVAS COLUMNAS SI NO EXISTEN ---
-            // Usar PRAGMA table_info para verificar si las columnas existen antes de añadirlas
-            db.run(`PRAGMA table_info(ProductosTerminados);`, (err, columns) => {
-                if (err) {
-                    console.error("Error al obtener información de tabla ProductosTerminados:", err.message);
-                    return;
-                }
-                const columnNames = columns.map(col => col.name);
+            if (err) {
+                console.error("Error creando tabla ProductosTerminados:", err.message);
+            } else {
+                console.log("Tabla ProductosTerminados verificada/creada.");
+                // La lógica para ALTER TABLE va aquí, DENTRO del callback de creación de ProductosTerminados
+                db.all(`PRAGMA table_info(ProductosTerminados);`, [], (pragmaErr, rows) => {
+                    if (pragmaErr) {
+                        console.error("Error al obtener información de tabla ProductosTerminados:", pragmaErr.message);
+                        return;
+                    }
+                    if (rows && rows.length > 0) {
+                        const columnNames = rows.map(col => col.name);
+                        if (!columnNames.includes('material_principal')) {
+                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN material_principal TEXT`, (alterErr) => {
+                                if (alterErr) console.error("Error añadiendo columna material_principal:", alterErr.message);
+                                else console.log("Columna material_principal añadida a ProductosTerminados.");
+                            });
+                        }
+                        if (!columnNames.includes('espesor_principal')) {
+                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN espesor_principal TEXT`, (alterErr) => {
+                                if (alterErr) console.error("Error añadiendo columna espesor_principal:", alterErr.message);
+                                else console.log("Columna espesor_principal añadida a ProductosTerminados.");
+                            });
+                        }
+                        if (!columnNames.includes('ancho_final')) {
+                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN ancho_final REAL`, (alterErr) => {
+                                if (alterErr) console.error("Error añadiendo columna ancho_final:", alterErr.message);
+                                else console.log("Columna ancho_final añadida a ProductosTerminados.");
+                            });
+                        }
+                        if (!columnNames.includes('largo_final')) {
+                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN largo_final REAL`, (alterErr) => {
+                                if (alterErr) console.error("Error añadiendo columna largo_final:", alterErr.message);
+                                else console.log("Columna largo_final añadida a ProductosTerminados.");
+                            });
+                        }
+                    } else if (rows) {
+                        console.log("PRAGMA table_info(ProductosTerminados) no devolvió información de columnas o la tabla está vacía.");
+                    }
+                });
+            }
+        }); 
 
-                if (!columnNames.includes('material_principal')) {
-                    db.run(`ALTER TABLE ProductosTerminados ADD COLUMN material_principal TEXT`, (err) => {
-                        if (err) console.error("Error añadiendo columna material_principal:", err.message);
-                        else console.log("Columna material_principal añadida a ProductosTerminados.");
-                    });
-                }
-                if (!columnNames.includes('espesor_principal')) {
-                    db.run(`ALTER TABLE ProductosTerminados ADD COLUMN espesor_principal TEXT`, (err) => {
-                        if (err) console.error("Error añadiendo columna espesor_principal:", err.message);
-                        else console.log("Columna espesor_principal añadida a ProductosTerminados.");
-                    });
-                }
-                if (!columnNames.includes('ancho_final')) {
-                    db.run(`ALTER TABLE ProductosTerminados ADD COLUMN ancho_final REAL`, (err) => {
-                        if (err) console.error("Error añadiendo columna ancho_final:", err.message);
-                        else console.log("Columna ancho_final añadida a ProductosTerminados.");
-                    });
-                }
-                if (!columnNames.includes('largo_final')) {
-                    db.run(`ALTER TABLE ProductosTerminados ADD COLUMN largo_final REAL`, (err) => {
-                        if (err) console.error("Error añadiendo columna largo_final:", err.message);
-                        else console.log("Columna largo_final añadida a ProductosTerminados.");
-                    });
-                }
-            });
-        });
+        
 
         db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

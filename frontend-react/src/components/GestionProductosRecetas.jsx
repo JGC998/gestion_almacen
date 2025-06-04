@@ -19,6 +19,7 @@ function GestionProductosRecetas() {
     // Estado para manejar el producto que se está editando
     const [editingProduct, setEditingProduct] = useState(null);
     // Estado para almacenar los materiales genéricos (para el desplegable de material)
+    // Esta variable ahora se usa para obtener los tipos principales, pero el fetch original se mantiene por si se usa en otro lado o para desarrollo futuro.
     const [materialesGenericos, setMaterialesGenericos] = useState([]);
     // Estado para errores de carga o creación
     const [error, setError] = useState(null);
@@ -31,13 +32,24 @@ function GestionProductosRecetas() {
         'PVC': ['2mm', '3mm'],
         'Fieltro': ['F10', 'F15']
     };
+    
+    // Opciones para los desplegables de material principal
+    const materialPrincipalOptions = Object.keys(espesorOptions);
 
     // Función para obtener los productos terminados del backend
     const fetchProductosTerminados = async () => {
         try {
             const response = await fetch('http://localhost:5002/api/productos-terminados');
             if (!response.ok) {
-                throw new Error(`Error del servidor: ${response.status}`);
+                // Intenta parsear el error del backend si es JSON
+                let errorMsg = `Error del servidor: ${response.status}`;
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.error || errorData.detalle || errorMsg;
+                } catch (e) {
+                    // No hacer nada si el cuerpo del error no es JSON
+                }
+                throw new Error(errorMsg);
             }
             const data = await response.json();
             setProductosTerminados(data);
@@ -48,7 +60,9 @@ function GestionProductosRecetas() {
         }
     };
 
-    // Función para cargar los materiales genéricos del backend (para el desplegable de material)
+    // Función para cargar los materiales genéricos del backend
+    // Esta función se mantiene por si es necesaria para futuras ampliaciones de "Recetas",
+    // pero el dropdown de material principal ahora usa materialPrincipalOptions.
     const fetchMaterialesGenericos = async () => {
         try {
             const response = await fetch('http://localhost:5002/api/materiales-genericos');
@@ -56,7 +70,7 @@ function GestionProductosRecetas() {
                 throw new Error(`Error del servidor: ${response.status}`);
             }
             const data = await response.json();
-            setMaterialesGenericos(data);
+            setMaterialesGenericos(data); // Podría usarse para otros selectores más detallados
             setError(null);
         } catch (err) {
             console.error("Error al cargar materiales genéricos para recetas:", err);
@@ -67,21 +81,15 @@ function GestionProductosRecetas() {
     // Cargar productos terminados y materiales genéricos al montar el componente
     useEffect(() => {
         fetchProductosTerminados();
-        fetchMaterialesGenericos();
+        fetchMaterialesGenericos(); // Se mantiene por si acaso, aunque el dropdown principal no lo use directamente
     }, []);
 
     // Efecto para recalcular el coste cuando cambian material, espesor, ancho o largo
-    // ESTE ES UN PLACEHOLDER. NECESITAS IMPLEMENTAR EL ENDPOINT EN TU BACKEND.
     useEffect(() => {
         const calculateCost = async () => {
             const { material, espesor, ancho, largo } = newProduct;
-
-            // Solo intentar calcular si todos los campos necesarios están presentes y son válidos
             if (material && espesor && ancho > 0 && largo > 0) {
                 try {
-                    // LLAMADA AL BACKEND: Necesitas crear un endpoint en server.js
-                    // Por ejemplo: POST /api/calcular-coste-producto-temporal
-                    // Que reciba material, espesor, ancho, largo y devuelva el coste calculado.
                     const response = await fetch('http://localhost:5002/api/calcular-coste-producto-temporal', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -93,39 +101,36 @@ function GestionProductosRecetas() {
                         })
                     });
                     if (!response.ok) {
-                        const errorData = await response.json();
+                        const errorData = await response.json().catch(() => ({}));
                         throw new Error(errorData.error || `Error del servidor: ${response.status}`);
                     }
                     const data = await response.json();
                     setNewProduct(prev => ({ ...prev, coste: data.costeCalculado }));
                 } catch (err) {
                     console.error("Error al calcular el coste:", err);
-                    // Si hay un error en el cálculo, el coste se resetea a 0
                     setNewProduct(prev => ({ ...prev, coste: 0 }));
-                    // Puedes mostrar un mensaje de error al usuario si lo deseas
-                    // setError(`Error al calcular coste: ${err.message}`);
                 }
             } else {
-                // Si faltan datos, el coste es 0
                 setNewProduct(prev => ({ ...prev, coste: 0 }));
             }
         };
-        calculateCost();
+        if (newProduct.material && newProduct.espesor && newProduct.ancho && newProduct.largo) {
+            calculateCost();
+        }
     }, [newProduct.material, newProduct.espesor, newProduct.ancho, newProduct.largo]);
 
 
     // Manejar cambios en el formulario de creación de producto
     const handleNewProductChange = (e) => {
         const { name, value } = e.target;
-        setNewProduct(prev => ({
-            ...prev,
-            [name]: value
-        }));
-
-        // Si cambia el material, resetear el espesor
-        if (name === 'material') {
-            setNewProduct(prev => ({ ...prev, espesor: '' }));
-        }
+        setNewProduct(prev => {
+            const updatedProduct = { ...prev, [name]: value };
+            // Si cambia el material, resetear el espesor
+            if (name === 'material') {
+                updatedProduct.espesor = '';
+            }
+            return updatedProduct;
+        });
     };
 
     // Manejar el envío del formulario para crear un nuevo producto
@@ -139,40 +144,34 @@ function GestionProductosRecetas() {
                 referencia: newProduct.referencia,
                 nombre: newProduct.nombre,
                 descripcion: newProduct.descripcion,
-                unidad_medida: newProduct.unidad_medida, // Siempre 'unidad'
-                coste_fabricacion_estandar: newProduct.coste, // El coste calculado
-                // Si estos campos son parte del "producto terminado" en tu DB, inclúyelos.
-                // Si son para una "receta" asociada al PT, la lógica sería diferente.
-                // Para este ejemplo, los enviamos como parte del producto terminado.
+                unidad_medida: newProduct.unidad_medida,
+                coste_fabricacion_estandar: newProduct.coste,
                 material_principal: newProduct.material,
                 espesor_principal: newProduct.espesor,
-                ancho_final: newProduct.ancho,
-                largo_final: newProduct.largo,
+                ancho_final: parseFloat(newProduct.ancho),
+                largo_final: parseFloat(newProduct.largo),
                 status: newProduct.status
             };
 
             const response = await fetch('http://localhost:5002/api/productos-terminados', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(productToSend),
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `Error del servidor: ${response.status}`);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || errorData.detalle || `Error del servidor: ${response.status}`);
             }
 
             const data = await response.json();
-            setSuccessMessage(`Producto creado con éxito: ${data.mensaje}`);
-            // Limpiar el formulario
+            setSuccessMessage(data.mensaje || `Producto creado con éxito.`); // Modificado para usar data.mensaje
             setNewProduct({
                 referencia: '', nombre: '', descripcion: '',
                 material: '', espesor: '', ancho: '', largo: '',
                 unidad_medida: 'unidad', coste: 0, status: 'ACTIVO'
             });
-            fetchProductosTerminados(); // Recargar la lista de productos
+            fetchProductosTerminados();
         } catch (err) {
             console.error("Error al crear producto:", err);
             setError(`Error al crear producto: ${err.message}`);
@@ -181,13 +180,21 @@ function GestionProductosRecetas() {
 
     // Manejar la edición de un producto existente
     const handleEditProduct = (product) => {
-        setEditingProduct({ ...product }); // Cargar los datos del producto en el estado de edición
+        // Asegurarse de que los valores numéricos se tratan como strings para los inputs si es necesario,
+        // o se convierten a número donde haga falta. Aquí los dejamos como vienen si el input los maneja.
+        setEditingProduct({ ...product });
     };
 
     // Manejar cambios en el formulario de edición
     const handleEditingProductChange = (e) => {
         const { name, value } = e.target;
-        setEditingProduct(prev => ({ ...prev, [name]: value }));
+        setEditingProduct(prev => {
+            const updatedProduct = { ...prev, [name]: value };
+            if (name === 'material_principal') { // material_principal es el name en el form de edición
+                updatedProduct.espesor_principal = ''; // Resetea el espesor si cambia el material
+            }
+            return updatedProduct;
+        });
     };
 
     // Guardar los cambios de un producto editado
@@ -199,22 +206,27 @@ function GestionProductosRecetas() {
         if (!editingProduct || !editingProduct.id) return;
 
         try {
+            // Asegurarse que ancho_final y largo_final son números
+            const productToUpdate = {
+                ...editingProduct,
+                ancho_final: parseFloat(editingProduct.ancho_final) || 0,
+                largo_final: parseFloat(editingProduct.largo_final) || 0,
+            };
+
             const response = await fetch(`http://localhost:5002/api/productos-terminados/${editingProduct.id}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(editingProduct),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(productToUpdate),
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `Error del servidor: ${response.status}`);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || errorData.detalle || `Error del servidor: ${response.status}`);
             }
-
+            
             setSuccessMessage(`Producto ID ${editingProduct.id} actualizado con éxito.`);
-            setEditingProduct(null); // Salir del modo edición
-            fetchProductosTerminados(); // Recargar la lista
+            setEditingProduct(null);
+            fetchProductosTerminados();
         } catch (err) {
             console.error("Error al actualizar producto:", err);
             setError(`Error al actualizar producto: ${err.message}`);
@@ -235,12 +247,12 @@ function GestionProductosRecetas() {
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `Error del servidor: ${response.status}`);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || errorData.detalle || `Error del servidor: ${response.status}`);
             }
-
+            
             setSuccessMessage(`Producto ID ${id} eliminado con éxito.`);
-            fetchProductosTerminados(); // Recargar la lista
+            fetchProductosTerminados();
         } catch (err) {
             console.error("Error al eliminar producto:", err);
             setError(`Error al eliminar producto: ${err.message}`);
@@ -295,7 +307,6 @@ function GestionProductosRecetas() {
                         </div>
                     </div>
 
-                    {/* Nuevos campos de material, espesor, ancho y largo */}
                     <div className="form-row">
                         <div className="form-group">
                             <label htmlFor="material">Material:</label>
@@ -307,10 +318,9 @@ function GestionProductosRecetas() {
                                 required
                             >
                                 <option value="">Selecciona un material</option>
-                                {/* Mapear los materiales genéricos obtenidos del backend */}
-                                {materialesGenericos.map(mat => (
-                                    <option key={mat.material_tipo} value={mat.material_tipo}>
-                                        {mat.material_tipo}
+                                {materialPrincipalOptions.map(material => (
+                                    <option key={material} value={material}>
+                                        {material}
                                     </option>
                                 ))}
                             </select>
@@ -371,12 +381,11 @@ function GestionProductosRecetas() {
                                 type="text"
                                 id="coste"
                                 name="coste"
-                                value={newProduct.coste.toFixed(4)} // Mostrar con 4 decimales
-                                readOnly // Campo de solo lectura
+                                value={newProduct.coste.toFixed(4)}
+                                readOnly
                                 className="read-only-input"
                             />
                         </div>
-                        {/* La unidad_medida no se muestra, ya que es 'unidad' por defecto */}
                     </div>
 
                     <button type="submit" className="btn-primary">Crear Producto</button>
@@ -392,10 +401,10 @@ function GestionProductosRecetas() {
                             <th>Referencia</th>
                             <th>Nombre</th>
                             <th>Descripción</th>
-                            <th>Material Principal</th> {/* Nueva columna */}
-                            <th>Espesor Principal</th> {/* Nueva columna */}
-                            <th>Ancho Final</th>       {/* Nueva columna */}
-                            <th>Largo Final</th>       {/* Nueva columna */}
+                            <th>Material Principal</th>
+                            <th>Espesor Principal</th>
+                            <th>Ancho Final</th>
+                            <th>Largo Final</th>
                             <th>Coste Estándar</th>
                             <th>Estado</th>
                             <th>Acciones</th>
@@ -412,11 +421,11 @@ function GestionProductosRecetas() {
                                     <td>{product.referencia}</td>
                                     <td>{product.nombre}</td>
                                     <td>{product.descripcion}</td>
-                                    <td>{product.material_principal || 'N/A'}</td> {/* Mostrar nuevo campo */}
-                                    <td>{product.espesor_principal || 'N/A'}</td> {/* Mostrar nuevo campo */}
-                                    <td>{product.ancho_final !== null ? product.ancho_final.toFixed(2) : 'N/A'}</td> {/* Mostrar nuevo campo */}
-                                    <td>{product.largo_final !== null ? product.largo_final.toFixed(2) : 'N/A'}</td> {/* Mostrar nuevo campo */}
-                                    <td>{product.coste_fabricacion_estandar !== null ? product.coste_fabricacion_estandar.toFixed(4) : 'N/A'}</td>
+                                    <td>{product.material_principal || 'N/A'}</td>
+                                    <td>{product.espesor_principal || 'N/A'}</td>
+                                    <td>{product.ancho_final !== null && product.ancho_final !== undefined ? parseFloat(product.ancho_final).toFixed(2) : 'N/A'}</td>
+                                    <td>{product.largo_final !== null && product.largo_final !== undefined ? parseFloat(product.largo_final).toFixed(2) : 'N/A'}</td>
+                                    <td>{product.coste_fabricacion_estandar !== null && product.coste_fabricacion_estandar !== undefined ? parseFloat(product.coste_fabricacion_estandar).toFixed(4) : 'N/A'}</td>
                                     <td>{product.status}</td>
                                     <td>
                                         <button onClick={() => handleEditProduct(product)} className="btn-secondary">Editar</button>
@@ -466,20 +475,19 @@ function GestionProductosRecetas() {
                                     onChange={handleEditingProductChange}
                                 ></textarea>
                             </div>
-                            {/* Campos de material, espesor, ancho, largo también deberían ser editables si se permite */}
                             <div className="form-group">
                                 <label htmlFor="edit-material">Material:</label>
                                 <select
                                     id="edit-material"
-                                    name="material_principal" // El nombre en la DB
+                                    name="material_principal"
                                     value={editingProduct.material_principal || ''}
                                     onChange={handleEditingProductChange}
                                     required
                                 >
                                     <option value="">Selecciona un material</option>
-                                    {materialesGenericos.map(mat => (
-                                        <option key={mat.material_tipo} value={mat.material_tipo}>
-                                            {mat.material_tipo}
+                                    {materialPrincipalOptions.map(material => (
+                                        <option key={material} value={material}>
+                                            {material}
                                         </option>
                                     ))}
                                 </select>
@@ -490,7 +498,7 @@ function GestionProductosRecetas() {
                                     <label htmlFor="edit-espesor">Espesor:</label>
                                     <select
                                         id="edit-espesor"
-                                        name="espesor_principal" // El nombre en la DB
+                                        name="espesor_principal"
                                         value={editingProduct.espesor_principal || ''}
                                         onChange={handleEditingProductChange}
                                         required
@@ -508,7 +516,7 @@ function GestionProductosRecetas() {
                                 <input
                                     type="number"
                                     id="edit-ancho"
-                                    name="ancho_final" // El nombre en la DB
+                                    name="ancho_final"
                                     value={editingProduct.ancho_final || ''}
                                     onChange={handleEditingProductChange}
                                     min="0"
@@ -521,7 +529,7 @@ function GestionProductosRecetas() {
                                 <input
                                     type="number"
                                     id="edit-largo"
-                                    name="largo_final" // El nombre en la DB
+                                    name="largo_final"
                                     value={editingProduct.largo_final || ''}
                                     onChange={handleEditingProductChange}
                                     min="0"
@@ -536,7 +544,7 @@ function GestionProductosRecetas() {
                                     type="text"
                                     id="edit-coste"
                                     name="coste_fabricacion_estandar"
-                                    value={editingProduct.coste_fabricacion_estandar !== null ? editingProduct.coste_fabricacion_estandar.toFixed(4) : '0.0000'}
+                                    value={editingProduct.coste_fabricacion_estandar !== null && editingProduct.coste_fabricacion_estandar !== undefined ? parseFloat(editingProduct.coste_fabricacion_estandar).toFixed(4) : '0.0000'}
                                     readOnly
                                     className="read-only-input"
                                 />
@@ -565,5 +573,6 @@ function GestionProductosRecetas() {
         </div>
     );
 }
+
 
 export default GestionProductosRecetas;

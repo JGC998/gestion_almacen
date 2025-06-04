@@ -564,59 +564,69 @@ async function eliminarPedidoCompleto(pedidoId) {
 
 
 async function insertarProductoTerminado(productoData) {
-    return new Promise((resolve, reject) => {
-        const { referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
-        const fecha_creacion = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+    const { referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
+    const fecha_creacion = new Date().toISOString().split('T')[0];
 
-        // Asegúrate de que los nombres de las columnas coincidan con tu tabla
-        const query = `INSERT INTO ProductosTerminados (
-            referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
-            material_principal, espesor_principal, ancho_final, largo_final
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        
-        db.run(query, [
-            referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
-            material_principal, espesor_principal, ancho_final, largo_final
-        ], function(err) {
-            if (err) {
-                console.error("Error al insertar producto terminado:", err.message);
-                if (err.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
-                    return reject(new Error("La referencia del producto terminado ya existe."));
-                }
-                return reject(err);
-            }
-            resolve(this.lastID);
-        });
-    });
+    const query = `INSERT INTO ProductosTerminados (
+        referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
+        material_principal, espesor_principal, ancho_final, largo_final
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+    const params = [
+        referencia,
+        nombre,
+        descripcion,
+        unidad_medida || 'unidad', // Valor por defecto si no se provee
+        parseFloat(coste_fabricacion_estandar) || 0, // Asegurar que es un número
+        fecha_creacion,
+        status || 'ACTIVO', // Valor por defecto
+        material_principal,
+        espesor_principal,
+        parseFloat(ancho_final) || null, // Asegurar que es un número o null
+        parseFloat(largo_final) || null  // Asegurar que es un número o null
+    ];
+
+    try {
+        // Usar el helper runDB que maneja la conexión y el cierre
+        const result = await runDB(query, params);
+        return result.lastID;
+    } catch (err) {
+        console.error("Error al insertar producto terminado:", err.message);
+        if (err.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
+            // Es importante relanzar para que el endpoint pueda manejar el error HTTP correcto
+            throw new Error("La referencia del producto terminado ya existe.");
+        }
+        throw err; // Relanzar otros errores
+    }
 }
 
 // Modificada para seleccionar los nuevos campos
 async function consultarProductosTerminados(filtros = {}) {
-    return new Promise((resolve, reject) => {
-        let query = `SELECT id, referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status,
-                     material_principal, espesor_principal, ancho_final, largo_final
-                     FROM ProductosTerminados`;
-        const params = [];
-        const conditions = [];
+    let query = `SELECT id, referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status,
+                         material_principal, espesor_principal, ancho_final, largo_final
+                         FROM ProductosTerminados`;
+    const params = [];
+    const conditions = [];
 
-        if (filtros.status) {
-            conditions.push(`status = ?`);
-            params.push(filtros.status);
-        }
-        // Puedes añadir más filtros aquí si los necesitas
+    if (filtros.status) {
+        conditions.push(`status = ?`);
+        params.push(filtros.status);
+    }
+    // Puedes añadir más filtros aquí si los necesitas
 
-        if (conditions.length > 0) {
-            query += ` WHERE ` + conditions.join(' AND ');
-        }
+    if (conditions.length > 0) {
+        query += ` WHERE ` + conditions.join(' AND ');
+    }
 
-        db.all(query, params, (err, rows) => {
-            if (err) {
-                console.error("Error al consultar productos terminados:", err.message);
-                return reject(err);
-            }
-            resolve(rows);
-        });
-    });
+    // Utiliza la función helper allDB que maneja la conexión y cierre
+    try {
+        const rows = await allDB(query, params);
+        return rows;
+    } catch (error) {
+        console.error("Error al consultar productos terminados:", error.message);
+        // Lanza el error para que sea capturado por el endpoint en server.js
+        throw error;
+    }
 }
 
 // Modificada para seleccionar los nuevos campos
@@ -672,80 +682,71 @@ async function actualizarProductoTerminado(id, updates) {
 // Esta función es un ejemplo y debe ser adaptada a tu lógica de negocio
 // y a la estructura de tu tabla StockMateriasPrimas.
 async function calcularCosteMaterialEspecifico(material_tipo, espesor, ancho, largo, appConfig) {
-    return new Promise(async (resolve, reject) => {
-        try {
-            // Paso 1: Obtener el coste base por metro cuadrado/unidad de la materia prima
-            // Esto es una SIMULACIÓN. Deberías consultar tu tabla StockMateriasPrimas
-            // para encontrar el coste unitario más relevante para el material y espesor dados.
-            // Por ejemplo, podrías buscar el coste_unitario_final de una bobina de StockMateriasPrimas
-            // que coincida con el material_tipo y espesor.
+    try {
+        const queryMateriaPrima = `
+            SELECT coste_unitario_final, unidad_medida
+            FROM StockMateriasPrimas
+            WHERE material_tipo = ? AND espesor = ?
+            ORDER BY fecha_entrada_almacen DESC, id DESC
+            LIMIT 1
+        `;
+        // Usar el helper getDB que maneja la conexión y el cierre
+        const materiaPrima = await getDB(queryMateriaPrima, [material_tipo, espesor]);
 
-            let costeBaseUnitarioMaterial = 0; // Coste por unidad de medida de la materia prima
-            let unidadMedidaMaterial = 'm'; // Asumimos metros por defecto para bobinas
+        let costeBaseUnitarioMaterial = 0;
+        let unidadMedidaMaterial = 'm'; // Asumir metros por defecto para bobinas
 
-            // Ejemplo: Buscar el coste de la materia prima más reciente o promedio
-            const queryMateriaPrima = `
-                SELECT coste_unitario_final, unidad_medida
-                FROM StockMateriasPrimas
-                WHERE material_tipo = ? AND espesor = ?
-                ORDER BY fecha_entrada_almacen DESC
-                LIMIT 1
-            `;
-            const materiaPrima = await new Promise((res, rej) => {
-                db.get(queryMateriaPrima, [material_tipo, espesor], (err, row) => {
-                    if (err) rej(err);
-                    else res(row);
-                });
-            });
-
-            if (materiaPrima) {
-                costeBaseUnitarioMaterial = materiaPrima.coste_unitario_final || 0;
-                unidadMedidaMaterial = materiaPrima.unidad_medida || 'm';
-            } else {
-                // Si no se encuentra una materia prima específica, puedes usar un valor por defecto
-                // o lanzar un error. Para este ejemplo, usaremos un valor por defecto.
-                console.warn(`No se encontró materia prima para ${material_tipo} con espesor ${espesor}. Usando coste por defecto.`);
-                // Aquí podrías tener una lógica para costes por defecto si no hay stock
-                if (material_tipo === 'Goma') {
-                    if (espesor === '6mm') costeBaseUnitarioMaterial = 5.0;
-                    else if (espesor === '8mm') costeBaseUnitarioMaterial = 6.5;
-                    else if (espesor === '10mm') costeBaseUnitarioMaterial = 8.0;
-                    else if (espesor === '12mm') costeBaseUnitarioMaterial = 9.5;
-                    else if (espesor === '15mm') costeBaseUnitarioMaterial = 11.0;
-                } else if (material_tipo === 'PVC') {
-                    if (espesor === '2mm') costeBaseUnitarioMaterial = 3.0;
-                    else if (espesor === '3mm') costeBaseUnitarioMaterial = 4.0;
-                } else if (material_tipo === 'Fieltro') {
-                    if (espesor === 'F10') costeBaseUnitarioMaterial = 2.5;
-                    else if (espesor === 'F15') costeBaseUnitarioMaterial = 3.5;
-                }
+        if (materiaPrima) {
+            costeBaseUnitarioMaterial = parseFloat(materiaPrima.coste_unitario_final) || 0;
+            unidadMedidaMaterial = materiaPrima.unidad_medida || 'm';
+        } else {
+            // Lógica de fallback si no se encuentra la materia prima (puedes ajustarla)
+            console.warn(`No se encontró materia prima en stock para ${material_tipo} con espesor ${espesor}. Usando coste por defecto simulado.`);
+            if (material_tipo === 'Goma') {
+                if (espesor === '6mm') costeBaseUnitarioMaterial = 5.0;
+                else if (espesor === '8mm') costeBaseUnitarioMaterial = 6.5;
+                else if (espesor === '10mm') costeBaseUnitarioMaterial = 8.0;
+                else if (espesor === '12mm') costeBaseUnitarioMaterial = 9.5;
+                else if (espesor === '15mm') costeBaseUnitarioMaterial = 11.0;
+            } else if (material_tipo === 'PVC') {
+                if (espesor === '2mm') costeBaseUnitarioMaterial = 3.0;
+                else if (espesor === '3mm') costeBaseUnitarioMaterial = 4.0;
+            } else if (material_tipo === 'Fieltro') {
+                if (espesor === 'F10') costeBaseUnitarioMaterial = 2.5;
+                else if (espesor === 'F15') costeBaseUnitarioMaterial = 3.5;
             }
-
-            let costeTotalMaterial = 0;
-            if (unidadMedidaMaterial === 'm') { // Si la materia prima se mide en metros (bobinas)
-                costeTotalMaterial = costeBaseUnitarioMaterial * ancho * largo;
-            } else if (unidadMedidaMaterial === 'ud') { // Si la materia prima se mide en unidades
-                // Esto dependerá de cómo se relaciona la unidad con ancho/largo.
-                // Para este ejemplo, asumimos que ancho y largo son dimensiones de una "unidad"
-                // y que el coste unitario ya lo contempla.
-                costeTotalMaterial = costeBaseUnitarioMaterial; // O costeBaseUnitarioMaterial * cantidad_de_unidades_necesarias
-            }
-            // Puedes añadir más lógica para diferentes unidades de medida
-
-            // Paso 2: Añadir costes de mano de obra (si aplica)
-            // Asumimos que el coste de mano de obra por metro de metraje se aplica al largo total
-            let costeManoObra = appConfig.coste_mano_obra_por_metro_metraje * largo;
-
-            // Paso 3: Sumar todos los costes
-            const costeFinalCalculado = costeTotalMaterial + costeManoObra;
-
-            resolve(costeFinalCalculado);
-
-        } catch (error) {
-            console.error("Error en calcularCosteMaterialEspecifico:", error.message);
-            reject(error);
         }
-    });
+
+        let costeTotalMaterial = 0;
+        if (unidadMedidaMaterial.toLowerCase() === 'm' || unidadMedidaMaterial.toLowerCase() === 'm2') { // Asumir m2 o m lineal donde el ancho es relevante
+            // Si el coste es por m2, y el producto usa largo * ancho de ese material:
+            // costeTotalMaterial = costeBaseUnitarioMaterial * ancho * largo;
+            // Si el coste es por m lineal de un ancho estándar y el producto requiere un ancho diferente, se complica.
+            // Por ahora, si es 'm', asumimos que es coste por m lineal de ese ancho específico si 'ancho' es el del producto.
+            // Si costeBaseUnitarioMaterial es por metro lineal de un ancho de bobina X, y el producto es de ancho Y, largo Z:
+            // (costeBaseUnitarioMaterial / X_bobina) * Y_producto * Z_producto
+            // Para simplificar, si la unidad es 'm', asumimos que el coste unitario es por m de la pieza de ancho 'ancho'
+            costeTotalMaterial = costeBaseUnitarioMaterial * largo; // Simplificación: coste por metro lineal de la pieza
+                                                                // Si ancho se refiere al ancho de la materia prima original y coste es por m2:
+                                                                // costeTotalMaterial = costeBaseUnitarioMaterial * ancho_MP_para_pieza * largo;
+                                                                // Es importante definir bien qué significa coste_unitario_final
+        } else if (unidadMedidaMaterial.toLowerCase() === 'ud') {
+            costeTotalMaterial = costeBaseUnitarioMaterial; // Asumimos que la cantidad es 1 ud. para el cálculo temporal
+        }
+        // Añadir más lógica para otras unidades si es necesario
+
+        let costeManoObra = 0;
+        if (appConfig && appConfig.coste_mano_obra_por_metro_metraje) { // Verificar que appConfig y la propiedad existan
+             costeManoObra = (parseFloat(appConfig.coste_mano_obra_por_metro_metraje) || 0) * largo;
+        }
+
+        const costeFinalCalculado = costeTotalMaterial + costeManoObra;
+        return costeFinalCalculado;
+
+    } catch (error) {
+        console.error("Error en calcularCosteMaterialEspecifico:", error.message, error.stack);
+        throw error; // Relanzar para que el endpoint lo capture
+    }
 }
 
 
