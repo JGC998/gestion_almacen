@@ -1,11 +1,22 @@
+// backend-node/db_operations.js
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const dbPath = path.resolve(__dirname, 'almacen', 'almacen.db');
-const configFilePath = path.resolve(__dirname, 'config.json'); // Para leer la configuración en algunas funciones
 const fs = require('fs');
+
+// Rutas
+const almacenDir = path.resolve(__dirname, 'almacen');
+const dbPath = path.resolve(almacenDir, 'almacen.db');
+const configFilePath = path.resolve(__dirname, 'config.json');
+
+// Asegúrate de que el directorio 'almacen' existe
+if (!fs.existsSync(almacenDir)){
+    fs.mkdirSync(almacenDir, { recursive: true });
+}
 
 /**
  * Establece una conexión a la base de datos SQLite.
+ * Cada llamada a esta función abre una nueva conexión.
+ * Es responsabilidad de la función que la llama cerrar la conexión.
  * @returns {sqlite3.Database} Objeto de la base de datos.
  * @throws {Error} Si no se puede conectar a la base de datos.
  */
@@ -13,31 +24,32 @@ function conectarDB() {
     const db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
             console.error("Error al conectar a la base de datos desde db_operations:", err.message);
-            throw err;
+            // No lanzar error aquí, solo loguear. El Promise de la función principal lo manejará.
         }
     });
     // Habilitar claves foráneas (importante para la integridad referencial)
     db.exec('PRAGMA foreign_keys = ON;', (err) => {
         if (err) {
-            console.error("Error al habilitar foreign keys:", err.message);
+            console.error("Error al habilitar foreign keys en db_operations:", err.message);
         }
     });
     return db;
 }
 
 /**
- * Helper para ejecutar una query dentro de una transacción.
- * No cierra la DB.
- * @param {sqlite3.Database} db - La instancia de la base de datos.
+ * Helper para ejecutar una query INSERT/UPDATE/DELETE.
+ * Cierra la DB al finalizar.
  * @param {string} sql - La consulta SQL.
  * @param {Array} params - Los parámetros de la consulta.
  * @returns {Promise<object>} Objeto con lastID y changes.
  */
-function runAsync(db, sql, params = []) {
+function runDB(sql, params = []) {
+    const db = conectarDB();
     return new Promise((resolve, reject) => {
-        db.run(sql, params, function(err) { // No usar arrow function para this.lastID
+        db.run(sql, params, function(err) { // No usar arrow function para this.lastID/changes
+            db.close(); // Cerrar la conexión después de la operación
             if (err) {
-                console.error('Error ejecutando SQL:', sql, params, err.message);
+                console.error('Error ejecutando SQL (run):', sql, params, err.message);
                 return reject(err);
             }
             resolve({ lastID: this.lastID, changes: this.changes });
@@ -46,16 +58,17 @@ function runAsync(db, sql, params = []) {
 }
 
 /**
- * Helper para ejecutar una consulta ALL dentro de una transacción.
- * No cierra la DB.
- * @param {sqlite3.Database} db - La instancia de la base de datos.
+ * Helper para ejecutar una consulta ALL (seleccionar múltiples filas).
+ * Cierra la DB al finalizar.
  * @param {string} sql - La consulta SQL.
  * @param {Array} params - Los parámetros de la consulta.
  * @returns {Promise<Array>} Array de filas.
  */
-function allAsync(db, sql, params = []) {
+function allDB(sql, params = []) {
+    const db = conectarDB();
     return new Promise((resolve, reject) => {
         db.all(sql, params, (err, rows) => {
+            db.close(); // Cerrar la conexión después de la operación
             if (err) {
                 console.error('Error ejecutando SQL (all):', sql, params, err.message);
                 return reject(err);
@@ -66,16 +79,17 @@ function allAsync(db, sql, params = []) {
 }
 
 /**
- * Helper para ejecutar una consulta GET dentro de una transacción.
- * No cierra la DB.
- * @param {sqlite3.Database} db - La instancia de la base de datos.
+ * Helper para ejecutar una consulta GET (seleccionar una sola fila).
+ * Cierra la DB al finalizar.
  * @param {string} sql - La consulta SQL.
  * @param {Array} params - Los parámetros de la consulta.
  * @returns {Promise<object|null>} Una fila o null.
  */
-function getAsync(db, sql, params = []) {
+function getDB(sql, params = []) {
+    const db = conectarDB();
     return new Promise((resolve, reject) => {
         db.get(sql, params, (err, row) => {
+            db.close(); // Cerrar la conexión después de la operación
             if (err) {
                 console.error('Error ejecutando SQL (get):', sql, params, err.message);
                 return reject(err);
@@ -85,203 +99,39 @@ function getAsync(db, sql, params = []) {
     });
 }
 
+// --- Funciones para transacciones (no cierran la DB, la instancia se pasa) ---
+// Estas son útiles cuando necesitas múltiples operaciones dentro de una única transacción.
+// La función que inicia la transacción es responsable de cerrar la DB.
 
-// --- FUNCIONES EXISTENTES (Mantenidas o ligeramente modificadas para usar db.close() en finally) ---
-
-function consultarStockMateriasPrimas(filtros = null) {
+function runAsync(dbInstance, sql, params = []) {
     return new Promise((resolve, reject) => {
-        const db = conectarDB();
-        let sql = `SELECT * FROM StockMateriasPrimas`;
-        const params = [];
-        const whereClauses = [];
-
-        if (filtros) {
-            if (filtros.material_tipo) {
-                whereClauses.push(`material_tipo = ?`);
-                params.push(filtros.material_tipo.toUpperCase());
-            }
-            if (filtros.status) {
-                whereClauses.push(`status = ?`);
-                params.push(filtros.status.toUpperCase());
-            }
-            if (filtros.buscar && filtros.buscar.trim() !== '') {
-                const terminoBusqueda = `%${filtros.buscar.trim().toUpperCase()}%`;
-                whereClauses.push(`(UPPER(referencia_stock) LIKE ? OR UPPER(origen_factura) LIKE ? OR UPPER(espesor) LIKE ? OR UPPER(subtipo_material) LIKE ? OR UPPER(color) LIKE ? OR UPPER(ubicacion) LIKE ?)`);
-                params.push(terminoBusqueda, terminoBusqueda, terminoBusqueda, terminoBusqueda, terminoBusqueda, terminoBusqueda);
-            }
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        
-        sql += ` ORDER BY fecha_entrada_almacen DESC`;
-
-        db.all(sql, params, (err, rows) => {
-            db.close();
-            if (err) {
-                console.error("Error al consultar StockMateriasPrimas con filtros:", err.message);
-                reject(err);
-            } else {
-                resolve(rows);
-            }
-        });
-    });
-}
-
-// NUEVA FUNCIÓN: Consultar StockComponentes
-function consultarStockComponentes(filtros = {}) {
-    return new Promise((resolve, reject) => {
-        const db = conectarDB();
-        let sql = `SELECT * FROM StockComponentes`;
-        const params = [];
-        const whereClauses = [];
-
-        if (filtros.componente_ref_like) {
-            whereClauses.push(`componente_ref LIKE ?`);
-            params.push(`%${filtros.componente_ref_like}%`);
-        }
-        if (filtros.status) {
-            whereClauses.push(`status = ?`);
-            params.push(filtros.status.toUpperCase());
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-
-        sql += ` ORDER BY fecha_entrada_almacen DESC`;
-
-        db.all(sql, params, (err, rows) => {
-            db.close();
-            if (err) {
-                console.error("Error al consultar StockComponentes con filtros:", err.message);
-                reject(err);
-            } else {
-                resolve(rows);
-            }
-        });
-    });
-}
-
-
-function consultarItemStockPorId(idItem, tablaItem) {
-    return new Promise((resolve, reject) => {
-        const tablasPermitidas = ['StockMateriasPrimas', 'StockComponentes'];
-        if (!tablasPermitidas.includes(tablaItem)) {
-            return reject(new Error(`Tabla no válida: ${tablaItem}`));
-        }
-        const db = conectarDB();
-        const sql = `SELECT * FROM ${tablaItem} WHERE id = ?`;
-        db.get(sql, [idItem], (err, row) => {
-            db.close();
-            if (err) {
-                console.error(`Error al consultar item ${idItem} en ${tablaItem}:`, err.message);
-                reject(err);
-            } else {
-                resolve(row || null);
-            }
-        });
-    });
-}
-
-function insertarPedidoProveedor(dbInstance, pedidoData) {
-    return new Promise((resolve, reject) => {
-        const sql = `INSERT INTO PedidosProveedores (
-                        numero_factura, proveedor, fecha_pedido, fecha_llegada,
-                        origen_tipo, observaciones, valor_conversion
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-        const params = [
-            pedidoData.numero_factura,
-            pedidoData.proveedor,
-            pedidoData.fecha_pedido,
-            pedidoData.fecha_llegada,
-            pedidoData.origen_tipo,
-            pedidoData.observaciones,
-            pedidoData.valor_conversion
-        ];
         dbInstance.run(sql, params, function(err) {
             if (err) {
-                console.error("Error al insertar en PedidosProveedores:", err.message);
-                if (err.message.includes("UNIQUE constraint failed: PedidosProveedores.numero_factura")) {
-                    return reject(new Error(`El número de factura '${pedidoData.numero_factura}' ya existe.`));
-                }
+                console.error('Error ejecutando SQL (transacción run):', sql, params, err.message);
                 return reject(err);
             }
-            resolve(this.lastID);
+            resolve({ lastID: this.lastID, changes: this.changes });
         });
     });
 }
 
-function insertarGastoPedido(dbInstance, gastoData) {
+function allAsync(dbInstance, sql, params = []) {
     return new Promise((resolve, reject) => {
-        const sql = `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur)
-                     VALUES (?, ?, ?, ?)`;
-        const params = [
-            gastoData.pedido_id,
-            gastoData.tipo_gasto,
-            gastoData.descripcion,
-            gastoData.coste_eur
-        ];
-        dbInstance.run(sql, params, function(err) {
+        dbInstance.all(sql, params, (err, rows) => {
             if (err) {
-                console.error("Error al insertar en GastosPedido:", err.message);
+                console.error('Error ejecutando SQL (transacción all):', sql, params, err.message);
                 return reject(err);
             }
-            resolve(this.lastID);
+            resolve(rows);
         });
     });
 }
 
-// MODIFICADA: insertarStockMateriaPrima para incluir peso_total_kg
-function insertarStockMateriaPrima(dbInstance, stockData) {
+function getAsync(dbInstance, sql, params = []) {
     return new Promise((resolve, reject) => {
-        const sql = `INSERT INTO StockMateriasPrimas (
-                        pedido_id, material_tipo, subtipo_material, referencia_stock,
-                        fecha_entrada_almacen, status, espesor, ancho,
-                        largo_inicial, largo_actual, unidad_medida, coste_unitario_final,
-                        color, ubicacion, notas, origen_factura, peso_total_kg
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        const params = [
-            stockData.pedido_id,
-            stockData.material_tipo,
-            stockData.subtipo_material,
-            stockData.referencia_stock,
-            stockData.fecha_entrada_almacen,
-            stockData.status,
-            stockData.espesor,
-            stockData.ancho,
-            stockData.largo_inicial,
-            stockData.largo_actual,
-            stockData.unidad_medida,
-            stockData.coste_unitario_final,
-            stockData.color,
-            stockData.ubicacion,
-            stockData.notas,
-            stockData.origen_factura,
-            stockData.peso_total_kg
-        ];
-        dbInstance.run(sql, params, function(err) {
+        dbInstance.get(sql, params, (err, row) => {
             if (err) {
-                console.error("Error al insertar en StockMateriasPrimas:", err.message);
-                if (err.message.includes("UNIQUE constraint failed: StockMateriasPrimas.referencia_stock")) {
-                    return reject(new Error(`La referencia de stock '${stockData.referencia_stock}' ya existe.`));
-                }
-                return reject(err);
-            }
-            resolve(this.lastID);
-        });
-    });
-}
-
-// MODIFICADA: buscarStockItemExistente - Ahora solo busca por referencia_stock (que es UNIQUE)
-function buscarStockItemExistente(dbInstance, referencia_stock) {
-    return new Promise((resolve, reject) => {
-        const sql = `SELECT id, largo_actual, largo_inicial, coste_unitario_final, peso_total_kg FROM StockMateriasPrimas
-                     WHERE referencia_stock = ?`;
-        dbInstance.get(sql, [referencia_stock], (err, row) => {
-            if (err) {
-                console.error("Error buscando ítem de stock existente:", err.message);
+                console.error('Error ejecutando SQL (transacción get):', sql, params, err.message);
                 return reject(err);
             }
             resolve(row || null);
@@ -289,42 +139,184 @@ function buscarStockItemExistente(dbInstance, referencia_stock) {
     });
 }
 
+
+// --- FUNCIONES EXISTENTES (Mantenidas o ligeramente modificadas) ---
+
+async function consultarStockMateriasPrimas(filtros = null) {
+    let sql = `SELECT * FROM StockMateriasPrimas`;
+    const params = [];
+    const whereClauses = [];
+
+    if (filtros) {
+        if (filtros.material_tipo) {
+            whereClauses.push(`material_tipo = ?`);
+            params.push(filtros.material_tipo.toUpperCase());
+        }
+        if (filtros.status) {
+            whereClauses.push(`status = ?`);
+            params.push(filtros.status.toUpperCase());
+        }
+        if (filtros.buscar && filtros.buscar.trim() !== '') {
+            const terminoBusqueda = `%${filtros.buscar.trim().toUpperCase()}%`;
+            whereClauses.push(`(UPPER(referencia_stock) LIKE ? OR UPPER(origen_factura) LIKE ? OR UPPER(espesor) LIKE ? OR UPPER(subtipo_material) LIKE ? OR UPPER(color) LIKE ? OR UPPER(ubicacion) LIKE ?)`);
+            params.push(terminoBusqueda, terminoBusqueda, terminoBusqueda, terminoBusqueda, terminoBusqueda, terminoBusqueda);
+        }
+    }
+
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    
+    sql += ` ORDER BY fecha_entrada_almacen DESC`;
+
+    return await allDB(sql, params);
+}
+
+// NUEVA FUNCIÓN: Consultar StockComponentes
+async function consultarStockComponentes(filtros = {}) {
+    let sql = `SELECT * FROM StockComponentes`;
+    const params = [];
+    const whereClauses = [];
+
+    if (filtros.componente_ref_like) {
+        whereClauses.push(`componente_ref LIKE ?`);
+        params.push(`%${filtros.componente_ref_like}%`);
+    }
+    if (filtros.status) {
+        whereClauses.push(`status = ?`);
+        params.push(filtros.status.toUpperCase());
+    }
+
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    sql += ` ORDER BY fecha_entrada_almacen DESC`;
+
+    return await allDB(sql, params);
+}
+
+async function consultarItemStockPorId(idItem, tablaItem) {
+    const tablasPermitidas = ['StockMateriasPrimas', 'StockComponentes'];
+    if (!tablasPermitidas.includes(tablaItem)) {
+        throw new Error(`Tabla no válida: ${tablaItem}`);
+    }
+    const sql = `SELECT * FROM ${tablaItem} WHERE id = ?`;
+    return await getDB(sql, [idItem]);
+}
+
+async function insertarPedidoProveedor(dbInstance, pedidoData) {
+    const sql = `INSERT INTO PedidosProveedores (
+                            numero_factura, proveedor, fecha_pedido, fecha_llegada,
+                            origen_tipo, observaciones, valor_conversion
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+        pedidoData.numero_factura,
+        pedidoData.proveedor,
+        pedidoData.fecha_pedido,
+        pedidoData.fecha_llegada,
+        pedidoData.origen_tipo,
+        pedidoData.observaciones,
+        pedidoData.valor_conversion
+    ];
+    try {
+        const result = await runAsync(dbInstance, sql, params);
+        return result.lastID;
+    } catch (err) {
+        if (err.message.includes("UNIQUE constraint failed: PedidosProveedores.numero_factura")) {
+            throw new Error(`El número de factura '${pedidoData.numero_factura}' ya existe.`);
+        }
+        throw err;
+    }
+}
+
+async function insertarGastoPedido(dbInstance, gastoData) {
+    const sql = `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur)
+                            VALUES (?, ?, ?, ?)`;
+    const params = [
+        gastoData.pedido_id,
+        gastoData.tipo_gasto,
+        gastoData.descripcion,
+        gastoData.coste_eur
+    ];
+    const result = await runAsync(dbInstance, sql, params);
+    return result.lastID;
+}
+
+// MODIFICADA: insertarStockMateriaPrima para incluir peso_total_kg
+async function insertarStockMateriaPrima(dbInstance, stockData) {
+    const sql = `INSERT INTO StockMateriasPrimas (
+                            pedido_id, material_tipo, subtipo_material, referencia_stock,
+                            fecha_entrada_almacen, status, espesor, ancho,
+                            largo_inicial, largo_actual, unidad_medida, coste_unitario_final,
+                            color, ubicacion, notas, origen_factura, peso_total_kg
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+        stockData.pedido_id,
+        stockData.material_tipo,
+        stockData.subtipo_material,
+        stockData.referencia_stock,
+        stockData.fecha_entrada_almacen,
+        stockData.status,
+        stockData.espesor,
+        stockData.ancho,
+        stockData.largo_inicial,
+        stockData.largo_actual,
+        stockData.unidad_medida,
+        stockData.coste_unitario_final,
+        stockData.color,
+        stockData.ubicacion,
+        stockData.notas,
+        stockData.origen_factura,
+        stockData.peso_total_kg
+    ];
+    try {
+        const result = await runAsync(dbInstance, sql, params);
+        return result.lastID;
+    } catch (err) {
+        if (err.message.includes("UNIQUE constraint failed: StockMateriasPrimas.referencia_stock")) {
+            throw new Error(`La referencia de stock '${stockData.referencia_stock}' ya existe.`);
+        }
+        throw err;
+    }
+}
+
+// MODIFICADA: buscarStockItemExistente - Ahora solo busca por referencia_stock (que es UNIQUE)
+async function buscarStockItemExistente(dbInstance, referencia_stock) {
+    const sql = `SELECT id, largo_actual, largo_inicial, coste_unitario_final, peso_total_kg FROM StockMateriasPrimas
+                            WHERE referencia_stock = ?`;
+    return await getAsync(dbInstance, sql, [referencia_stock]);
+}
+
 // MODIFICADA: actualizarStockItemExistente para incluir peso_total_kg
-function actualizarStockItemExistente(dbInstance, idStockItem, datosActualizacion) {
-    return new Promise((resolve, reject) => {
-        const sql = `UPDATE StockMateriasPrimas
-                     SET largo_actual = largo_actual + ?,
-                         largo_inicial = largo_inicial + ?,
-                         coste_unitario_final = ?,
-                         fecha_entrada_almacen = ?,
-                         pedido_id = ?,
-                         origen_factura = ?,
-                         peso_total_kg = peso_total_kg + ?,
-                         status = 'DISPONIBLE'
-                     WHERE id = ?`;
-        const params = [
-            datosActualizacion.cantidad_nueva,
-            datosActualizacion.cantidad_nueva,
-            datosActualizacion.nuevo_coste_unitario_final,
-            datosActualizacion.nueva_fecha_entrada_almacen,
-            datosActualizacion.nuevo_pedido_id,
-            datosActualizacion.nueva_origen_factura,
-            datosActualizacion.peso_nuevo_kg,
-            idStockItem
-        ];
-        dbInstance.run(sql, params, function(err) {
-            if (err) {
-                console.error("Error actualizando ítem de stock existente:", err.message);
-                return reject(err);
-            }
-            resolve(this.changes);
-        });
-    });
+async function actualizarStockItemExistente(dbInstance, idStockItem, datosActualizacion) {
+    const sql = `UPDATE StockMateriasPrimas
+                            SET largo_actual = largo_actual + ?,
+                                largo_inicial = largo_inicial + ?,
+                                coste_unitario_final = ?,
+                                fecha_entrada_almacen = ?,
+                                pedido_id = ?,
+                                origen_factura = ?,
+                                peso_total_kg = peso_total_kg + ?,
+                                status = 'DISPONIBLE'
+                            WHERE id = ?`;
+    const params = [
+        datosActualizacion.cantidad_nueva,
+        datosActualizacion.cantidad_nueva,
+        datosActualizacion.nuevo_coste_unitario_final,
+        datosActualizacion.nueva_fecha_entrada_almacen,
+        datosActualizacion.nuevo_pedido_id,
+        datosActualizacion.nueva_origen_factura,
+        datosActualizacion.peso_nuevo_kg,
+        idStockItem
+    ];
+    const result = await runAsync(dbInstance, sql, params);
+    return result.changes;
 }
 
 async function procesarNuevoPedido(datosCompletosPedido) {
     const { pedido, lineas, gastos, material_tipo_general } = datosCompletosPedido;
-    const db = conectarDB();
+    const db = conectarDB(); // Conexión para la transacción
 
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
@@ -383,80 +375,69 @@ async function procesarNuevoPedido(datosCompletosPedido) {
         await runAsync(db, 'ROLLBACK;');
         throw error;
     } finally {
-        db.close();
+        db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
 
-function consultarListaPedidos(filtros = {}) {
-    return new Promise((resolve, reject) => {
-        const db = conectarDB();
-        let sql = `SELECT id, numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion
-                   FROM PedidosProveedores`;
-        const params = [];
-        const whereClauses = [];
+async function consultarListaPedidos(filtros = {}) {
+    let sql = `SELECT id, numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion
+                    FROM PedidosProveedores`;
+    const params = [];
+    const whereClauses = [];
 
-        if (filtros.origen_tipo) {
-            whereClauses.push(`origen_tipo = ?`);
-            params.push(filtros.origen_tipo.toUpperCase());
-        }
-        if (filtros.proveedor_like) {
-            whereClauses.push(`proveedor LIKE ?`);
-            params.push(`%${filtros.proveedor_like}%`);
-        }
-        if (filtros.factura_like) {
-            whereClauses.push(`numero_factura LIKE ?`);
-            params.push(`%${filtros.factura_like}%`);
-        }
-        if (filtros.fecha_pedido_desde) {
-            whereClauses.push(`fecha_pedido >= ?`);
-            params.push(filtros.fecha_pedido_desde);
-        }
-        if (filtros.fecha_pedido_hasta) {
-            whereClauses.push(`fecha_pedido <= ?`);
-            params.push(filtros.fecha_pedido_hasta);
-        }
+    if (filtros.origen_tipo) {
+        whereClauses.push(`origen_tipo = ?`);
+        params.push(filtros.origen_tipo.toUpperCase());
+    }
+    if (filtros.proveedor_like) {
+        whereClauses.push(`proveedor LIKE ?`);
+        params.push(`%${filtros.proveedor_like}%`);
+    }
+    if (filtros.factura_like) {
+        whereClauses.push(`numero_factura LIKE ?`);
+        params.push(`%${filtros.factura_like}%`);
+    }
+    if (filtros.fecha_pedido_desde) {
+        whereClauses.push(`fecha_pedido >= ?`);
+        params.push(filtros.fecha_pedido_desde);
+    }
+    if (filtros.fecha_pedido_hasta) {
+        whereClauses.push(`fecha_pedido <= ?`);
+        params.push(filtros.fecha_pedido_hasta);
+    }
 
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        
-        sql += ` ORDER BY fecha_pedido DESC, id DESC`;
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    
+    sql += ` ORDER BY fecha_pedido DESC, id DESC`;
 
-        db.all(sql, params, (err, rows) => {
-            db.close();
-            if (err) {
-                console.error("Error al consultar Lista de Pedidos:", err.message);
-                reject(err);
-            } else {
-                resolve(rows);
-            }
-        });
-    });
+    return await allDB(sql, params);
 }
 
-function consultarInfoPedidoPorId(dbInstance, pedidoId) {
+async function consultarInfoPedidoPorId(dbInstance, pedidoId) {
     return getAsync(dbInstance, `SELECT * FROM PedidosProveedores WHERE id = ?`, [pedidoId]);
 }
 
-function consultarGastosPorPedidoId(dbInstance, pedidoId) {
+async function consultarGastosPorPedidoId(dbInstance, pedidoId) {
     return allAsync(dbInstance, `SELECT id, tipo_gasto, descripcion, coste_eur FROM GastosPedido WHERE pedido_id = ? ORDER BY id`, [pedidoId]);
 }
 
-function consultarStockItemsPorPedidoId(dbInstance, pedidoId) {
+async function consultarStockItemsPorPedidoId(dbInstance, pedidoId) {
     return allAsync(dbInstance, `SELECT id, referencia_stock, material_tipo, subtipo_material, espesor, ancho, color,
-                            largo_inicial, largo_actual, unidad_medida, coste_unitario_final, status,
-                            fecha_entrada_almacen, ubicacion, notas, peso_total_kg
-                     FROM StockMateriasPrimas
-                     WHERE pedido_id = ?
-                     ORDER BY id`, [pedidoId]);
+                                 largo_inicial, largo_actual, unidad_medida, coste_unitario_final, status,
+                                 fecha_entrada_almacen, ubicacion, notas, peso_total_kg
+                           FROM StockMateriasPrimas
+                           WHERE pedido_id = ?
+                           ORDER BY id`, [pedidoId]);
 }
 
-function consultarLineasPedidoPorPedidoId(dbInstance, pedidoId) {
+async function consultarLineasPedidoPorPedidoId(dbInstance, pedidoId) {
     return allAsync(dbInstance, `SELECT cantidad_original, precio_unitario_original, moneda_original FROM LineasPedido WHERE pedido_id = ?`, [pedidoId]);
 }
 
 async function obtenerDetallesCompletosPedido(pedidoId) {
-    const db = conectarDB();
+    const db = conectarDB(); // Conexión para la transacción
     try {
         const pedidoInfo = await consultarInfoPedidoPorId(db, pedidoId);
         if (!pedidoInfo) {
@@ -516,64 +497,59 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
         console.error(`Error obteniendo detalles completos del pedido ${pedidoId}:`, error.message, error.stack);
         throw error;
     } finally {
-        db.close();
+        db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
 
-function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
-    return new Promise((resolve, reject) => {
-        const db = conectarDB();
-        const estadosPermitidos = ['DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO'];
-        if (!estadosPermitidos.includes(nuevoEstado.toUpperCase())) {
-            db.close();
-            return reject(new Error(`Estado '${nuevoEstado}' no válido.`));
+async function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
+    const estadosPermitidos = ['DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO'];
+    if (!estadosPermitidos.includes(nuevoEstado.toUpperCase())) {
+        throw new Error(`Estado '${nuevoEstado}' no válido.`);
+    }
+
+    const sql = `UPDATE StockMateriasPrimas SET status = ? WHERE id = ?`;
+    const params = [nuevoEstado.toUpperCase(), stockItemId];
+
+    try {
+        const result = await runDB(sql, params);
+        if (result.changes === 0) {
+            throw new Error(`No se encontró el ítem de stock con ID ${stockItemId} para actualizar.`);
         }
-
-        const sql = `UPDATE StockMateriasPrimas SET status = ? WHERE id = ?`;
-        const params = [nuevoEstado.toUpperCase(), stockItemId];
-
-        db.run(sql, params, function(err) {
-            db.close();
-            if (err) {
-                console.error(`Error al actualizar estado del ítem de stock ${stockItemId}:`, err.message);
-                return reject(err);
-            }
-            if (this.changes === 0) {
-                return reject(new Error(`No se encontró el ítem de stock con ID ${stockItemId} para actualizar.`));
-            }
-            resolve(this.changes);
-        });
-    });
+        return result.changes;
+    } catch (err) {
+        console.error(`Error al actualizar estado del ítem de stock ${stockItemId}:`, err.message);
+        throw err;
+    }
 }
 
 async function eliminarPedidoCompleto(pedidoId) {
-    const db = conectarDB();
+    const db = conectarDB(); // Conexión para la transacción
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
         const stockChanges = await runAsync(db, 'DELETE FROM StockMateriasPrimas WHERE pedido_id = ?', [pedidoId]);
-        console.log(`StockMateriasPrimas eliminadas para pedido ID ${pedidoId}: ${stockChanges} filas`);
+        console.log(`StockMateriasPrimas eliminadas para pedido ID ${pedidoId}: ${stockChanges.changes} filas`);
 
         const gastosChanges = await runAsync(db, 'DELETE FROM GastosPedido WHERE pedido_id = ?', [pedidoId]);
-        console.log(`GastosPedido eliminados para pedido ID ${pedidoId}: ${gastosChanges} filas`);
+        console.log(`GastosPedido eliminados para pedido ID ${pedidoId}: ${gastosChanges.changes} filas`);
 
         const lineasPedidoChanges = await runAsync(db, 'DELETE FROM LineasPedido WHERE pedido_id = ?', [pedidoId]);
-        console.log(`LineasPedido eliminadas para pedido ID ${pedidoId}: ${lineasPedidoChanges} filas`);
+        console.log(`LineasPedido eliminadas para pedido ID ${pedidoId}: ${lineasPedidoChanges.changes} filas`);
 
         const pedidoPrincipalChanges = await runAsync(db, 'DELETE FROM PedidosProveedores WHERE id = ?', [pedidoId]);
-        console.log(`PedidosProveedores eliminado para ID ${pedidoId}: ${pedidoPrincipalChanges} filas`);
+        console.log(`PedidosProveedores eliminado para ID ${pedidoId}: ${pedidoPrincipalChanges.changes} filas`);
 
-        if (pedidoPrincipalChanges === 0) {
+        if (pedidoPrincipalChanges.changes === 0) {
             await runAsync(db, 'ROLLBACK;');
             throw new Error(`Pedido con ID ${pedidoId} no encontrado.`);
         }
 
         await runAsync(db, 'COMMIT;');
         return {
-            pedidoPrincipalEliminado: pedidoPrincipalChanges,
-            gastosEliminados: gastosChanges,
-            lineasPedidoEliminadas: lineasPedidoChanges,
-            stockItemsEliminados: stockChanges,
+            pedidoPrincipalEliminado: pedidoPrincipalChanges.changes,
+            gastosEliminados: gastosChanges.changes,
+            lineasPedidoEliminadas: lineasPedidoChanges.changes,
+            stockItemsEliminados: stockChanges.changes,
             mensaje: `Pedido ID ${pedidoId} y datos asociados eliminados.`
         };
 
@@ -582,212 +558,277 @@ async function eliminarPedidoCompleto(pedidoId) {
         await runAsync(db, 'ROLLBACK;');
         throw error;
     } finally {
-        db.close();
+        db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
 
 
-// --- NUEVAS FUNCIONES PARA LA FASE 5 ---
-
-// --- ProductosTerminados ---
 async function insertarProductoTerminado(productoData) {
-    const db = conectarDB();
-    try {
-        const result = await runAsync(db, `INSERT INTO ProductosTerminados (
-            referencia, nombre, descripcion, unidad_medida,
-            coste_fabricacion_estandar, margen_venta_default, precio_venta_sugerido,
-            coste_extra_unitario, fecha_creacion, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-            productoData.referencia,
-            productoData.nombre,
-            productoData.descripcion || null,
-            productoData.unidad_medida || 'unidad',
-            parseFloat(productoData.coste_fabricacion_estandar) || 0,
-            parseFloat(productoData.margen_venta_default) || 0,
-            parseFloat(productoData.precio_venta_sugerido) || 0,
-            parseFloat(productoData.coste_extra_unitario) || 0,
-            new Date().toISOString().split('T')[0],
-            productoData.status || 'ACTIVO'
-        ]);
-        return result.lastID;
-    } catch (error) {
-        if (error.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
-            throw new Error(`La referencia de producto '${productoData.referencia}' ya existe.`);
-        }
-        throw error;
-    } finally {
-        db.close();
-    }
-}
+    return new Promise((resolve, reject) => {
+        const { referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
+        const fecha_creacion = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
 
-async function consultarProductosTerminados(filtros = {}) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT * FROM ProductosTerminados`;
-        const params = [];
-        const whereClauses = [];
-
-        if (filtros.referencia_like) {
-            whereClauses.push(`referencia LIKE ?`);
-            params.push(`%${filtros.referencia_like}%`);
-        }
-        if (filtros.nombre_like) {
-            whereClauses.push(`nombre LIKE ?`);
-            params.push(`%${filtros.nombre_like}%`);
-        }
-        if (filtros.status) {
-            whereClauses.push(`status = ?`);
-            params.push(filtros.status.toUpperCase());
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        sql += ` ORDER BY nombre ASC`;
-
-        return await allAsync(db, sql, params);
-    } finally {
-        db.close();
-    }
-}
-
-async function consultarProductoTerminadoPorId(id) {
-    const db = conectarDB();
-    try {
-        return await getAsync(db, `SELECT * FROM ProductosTerminados WHERE id = ?`, [id]);
-    } finally {
-        db.close();
-    }
-}
-
-async function actualizarProductoTerminado(id, updates) {
-    const db = conectarDB();
-    try {
-        const setClauses = [];
-        const params = [];
-
-        for (const key in updates) {
-            if (updates.hasOwnProperty(key) && key !== 'id') { // No permitimos actualizar el ID
-                setClauses.push(`${key} = ?`);
-                // Asegurar que los valores numéricos se parseen
-                if (['coste_fabricacion_estandar', 'margen_venta_default', 'precio_venta_sugerido', 'coste_extra_unitario'].includes(key)) {
-                    params.push(parseFloat(updates[key]) || 0);
-                } else {
-                    params.push(updates[key]);
+        // Asegúrate de que los nombres de las columnas coincidan con tu tabla
+        const query = `INSERT INTO ProductosTerminados (
+            referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
+            material_principal, espesor_principal, ancho_final, largo_final
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        
+        db.run(query, [
+            referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
+            material_principal, espesor_principal, ancho_final, largo_final
+        ], function(err) {
+            if (err) {
+                console.error("Error al insertar producto terminado:", err.message);
+                if (err.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
+                    return reject(new Error("La referencia del producto terminado ya existe."));
                 }
+                return reject(err);
+            }
+            resolve(this.lastID);
+        });
+    });
+}
+
+// Modificada para seleccionar los nuevos campos
+async function consultarProductosTerminados(filtros = {}) {
+    return new Promise((resolve, reject) => {
+        let query = `SELECT id, referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status,
+                     material_principal, espesor_principal, ancho_final, largo_final
+                     FROM ProductosTerminados`;
+        const params = [];
+        const conditions = [];
+
+        if (filtros.status) {
+            conditions.push(`status = ?`);
+            params.push(filtros.status);
+        }
+        // Puedes añadir más filtros aquí si los necesitas
+
+        if (conditions.length > 0) {
+            query += ` WHERE ` + conditions.join(' AND ');
+        }
+
+        db.all(query, params, (err, rows) => {
+            if (err) {
+                console.error("Error al consultar productos terminados:", err.message);
+                return reject(err);
+            }
+            resolve(rows);
+        });
+    });
+}
+
+// Modificada para seleccionar los nuevos campos
+async function consultarProductoTerminadoPorId(id) {
+    return new Promise((resolve, reject) => {
+        const query = `SELECT id, referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status,
+                       material_principal, espesor_principal, ancho_final, largo_final
+                       FROM ProductosTerminados WHERE id = ?`;
+        db.get(query, [id], (err, row) => {
+            if (err) {
+                console.error("Error al consultar producto terminado por ID:", err.message);
+                return reject(err);
+            }
+            resolve(row);
+        });
+    });
+}
+
+// Modificada para permitir la actualización de los nuevos campos
+async function actualizarProductoTerminado(id, updates) {
+    return new Promise((resolve, reject) => {
+        const setParts = [];
+        const params = [];
+        for (const key in updates) {
+            // Asegúrate de que solo actualizas campos válidos
+            if (['referencia', 'nombre', 'descripcion', 'unidad_medida', 'coste_fabricacion_estandar', 'status',
+                 'material_principal', 'espesor_principal', 'ancho_final', 'largo_final'].includes(key)) {
+                setParts.push(`${key} = ?`);
+                params.push(updates[key]);
             }
         }
-
-        if (setClauses.length === 0) {
-            throw new Error("No hay campos para actualizar.");
+        if (setParts.length === 0) {
+            return reject(new Error("No se proporcionaron campos válidos para actualizar."));
         }
-
         params.push(id);
-        const result = await runAsync(db, `UPDATE ProductosTerminados SET ${setClauses.join(', ')} WHERE id = ?`, params);
-        if (result.changes === 0) {
-            throw new Error(`No se encontró ProductoTerminado con ID ${id} para actualizar.`);
-        }
-        return result.changes;
-    } catch (error) {
-        if (error.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
-            throw new Error(`La referencia de producto ya existe.`);
-        }
-        throw error;
-    } finally {
-        db.close();
-    }
+        const query = `UPDATE ProductosTerminados SET ${setParts.join(', ')} WHERE id = ?`;
+        db.run(query, params, function(err) {
+            if (err) {
+                console.error("Error al actualizar producto terminado:", err.message);
+                if (err.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
+                    return reject(new Error("La referencia del producto terminado ya existe."));
+                }
+                return reject(err);
+            }
+            resolve(this.changes);
+        });
+    });
 }
 
+// ... (tu función eliminarProductoTerminado se mantiene igual)
+
+// --- NUEVA FUNCIÓN PARA CALCULAR COSTE DE MATERIAL ESPECÍFICO ---
+// Esta función es un ejemplo y debe ser adaptada a tu lógica de negocio
+// y a la estructura de tu tabla StockMateriasPrimas.
+async function calcularCosteMaterialEspecifico(material_tipo, espesor, ancho, largo, appConfig) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Paso 1: Obtener el coste base por metro cuadrado/unidad de la materia prima
+            // Esto es una SIMULACIÓN. Deberías consultar tu tabla StockMateriasPrimas
+            // para encontrar el coste unitario más relevante para el material y espesor dados.
+            // Por ejemplo, podrías buscar el coste_unitario_final de una bobina de StockMateriasPrimas
+            // que coincida con el material_tipo y espesor.
+
+            let costeBaseUnitarioMaterial = 0; // Coste por unidad de medida de la materia prima
+            let unidadMedidaMaterial = 'm'; // Asumimos metros por defecto para bobinas
+
+            // Ejemplo: Buscar el coste de la materia prima más reciente o promedio
+            const queryMateriaPrima = `
+                SELECT coste_unitario_final, unidad_medida
+                FROM StockMateriasPrimas
+                WHERE material_tipo = ? AND espesor = ?
+                ORDER BY fecha_entrada_almacen DESC
+                LIMIT 1
+            `;
+            const materiaPrima = await new Promise((res, rej) => {
+                db.get(queryMateriaPrima, [material_tipo, espesor], (err, row) => {
+                    if (err) rej(err);
+                    else res(row);
+                });
+            });
+
+            if (materiaPrima) {
+                costeBaseUnitarioMaterial = materiaPrima.coste_unitario_final || 0;
+                unidadMedidaMaterial = materiaPrima.unidad_medida || 'm';
+            } else {
+                // Si no se encuentra una materia prima específica, puedes usar un valor por defecto
+                // o lanzar un error. Para este ejemplo, usaremos un valor por defecto.
+                console.warn(`No se encontró materia prima para ${material_tipo} con espesor ${espesor}. Usando coste por defecto.`);
+                // Aquí podrías tener una lógica para costes por defecto si no hay stock
+                if (material_tipo === 'Goma') {
+                    if (espesor === '6mm') costeBaseUnitarioMaterial = 5.0;
+                    else if (espesor === '8mm') costeBaseUnitarioMaterial = 6.5;
+                    else if (espesor === '10mm') costeBaseUnitarioMaterial = 8.0;
+                    else if (espesor === '12mm') costeBaseUnitarioMaterial = 9.5;
+                    else if (espesor === '15mm') costeBaseUnitarioMaterial = 11.0;
+                } else if (material_tipo === 'PVC') {
+                    if (espesor === '2mm') costeBaseUnitarioMaterial = 3.0;
+                    else if (espesor === '3mm') costeBaseUnitarioMaterial = 4.0;
+                } else if (material_tipo === 'Fieltro') {
+                    if (espesor === 'F10') costeBaseUnitarioMaterial = 2.5;
+                    else if (espesor === 'F15') costeBaseUnitarioMaterial = 3.5;
+                }
+            }
+
+            let costeTotalMaterial = 0;
+            if (unidadMedidaMaterial === 'm') { // Si la materia prima se mide en metros (bobinas)
+                costeTotalMaterial = costeBaseUnitarioMaterial * ancho * largo;
+            } else if (unidadMedidaMaterial === 'ud') { // Si la materia prima se mide en unidades
+                // Esto dependerá de cómo se relaciona la unidad con ancho/largo.
+                // Para este ejemplo, asumimos que ancho y largo son dimensiones de una "unidad"
+                // y que el coste unitario ya lo contempla.
+                costeTotalMaterial = costeBaseUnitarioMaterial; // O costeBaseUnitarioMaterial * cantidad_de_unidades_necesarias
+            }
+            // Puedes añadir más lógica para diferentes unidades de medida
+
+            // Paso 2: Añadir costes de mano de obra (si aplica)
+            // Asumimos que el coste de mano de obra por metro de metraje se aplica al largo total
+            let costeManoObra = appConfig.coste_mano_obra_por_metro_metraje * largo;
+
+            // Paso 3: Sumar todos los costes
+            const costeFinalCalculado = costeTotalMaterial + costeManoObra;
+
+            resolve(costeFinalCalculado);
+
+        } catch (error) {
+            console.error("Error en calcularCosteMaterialEspecifico:", error.message);
+            reject(error);
+        }
+    });
+}
+
+
 async function eliminarProductoTerminado(id) {
-    const db = conectarDB();
+    const sql = `DELETE FROM ProductosTerminados WHERE id = ?`;
     try {
-        const result = await runAsync(db, `DELETE FROM ProductosTerminados WHERE id = ?`, [id]);
+        const result = await runDB(sql, [id]);
         if (result.changes === 0) {
             throw new Error(`No se encontró ProductoTerminado con ID ${id} para eliminar.`);
         }
         return result.changes;
-    } finally {
-        db.close();
+    } catch (error) {
+        throw error;
     }
 }
 
 // --- Maquinaria ---
 async function insertarMaquinaria(maquinaData) {
-    const db = conectarDB();
+    const sql = `INSERT INTO Maquinaria (
+        nombre, descripcion, coste_adquisicion, coste_hora_operacion
+    ) VALUES (?, ?, ?, ?)`;
+    const params = [
+        maquinaData.nombre,
+        maquinaData.descripcion || null,
+        parseFloat(maquinaData.coste_adquisicion) || 0,
+        parseFloat(maquinaData.coste_hora_operacion) || 0
+    ];
     try {
-        const result = await runAsync(db, `INSERT INTO Maquinaria (
-            nombre, descripcion, coste_adquisicion, coste_hora_operacion
-        ) VALUES (?, ?, ?, ?)`, [
-            maquinaData.nombre,
-            maquinaData.descripcion || null,
-            parseFloat(maquinaData.coste_adquisicion) || 0,
-            parseFloat(maquinaData.coste_hora_operacion) || 0
-        ]);
+        const result = await runDB(sql, params);
         return result.lastID;
     } catch (error) {
         if (error.message.includes("UNIQUE constraint failed: Maquinaria.nombre")) {
             throw new Error(`El nombre de la máquina '${maquinaData.nombre}' ya existe.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function consultarMaquinaria(filtros = {}) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT * FROM Maquinaria`;
-        const params = [];
-        const whereClauses = [];
+    let sql = `SELECT * FROM Maquinaria`;
+    const params = [];
+    const whereClauses = [];
 
-        if (filtros.nombre_like) {
-            whereClauses.push(`nombre LIKE ?`);
-            params.push(`%${filtros.nombre_like}%`);
-        }
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        sql += ` ORDER BY nombre ASC`;
-
-        return await allAsync(db, sql, params);
-    } finally {
-        db.close();
+    if (filtros.nombre_like) {
+        whereClauses.push(`nombre LIKE ?`);
+        params.push(`%${filtros.nombre_like}%`);
     }
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    sql += ` ORDER BY nombre ASC`;
+
+    return await allDB(sql, params);
 }
 
 async function consultarMaquinariaPorId(id) {
-    const db = conectarDB();
-    try {
-        return await getAsync(db, `SELECT * FROM Maquinaria WHERE id = ?`, [id]);
-    } finally {
-        db.close();
-    }
+    const sql = `SELECT * FROM Maquinaria WHERE id = ?`;
+    return await getDB(sql, [id]);
 }
 
 async function actualizarMaquinaria(id, updates) {
-    const db = conectarDB();
-    try {
-        const setClauses = [];
-        const params = [];
+    const setClauses = [];
+    const params = [];
 
-        for (const key in updates) {
-            if (updates.hasOwnProperty(key) && key !== 'id') {
-                setClauses.push(`${key} = ?`);
-                if (['coste_adquisicion', 'coste_hora_operacion'].includes(key)) {
-                    params.push(parseFloat(updates[key]) || 0);
-                } else {
-                    params.push(updates[key]);
-                }
+    for (const key in updates) {
+        if (updates.hasOwnProperty(key) && key !== 'id') {
+            setClauses.push(`${key} = ?`);
+            if (['coste_adquisicion', 'coste_hora_operacion'].includes(key)) {
+                params.push(parseFloat(updates[key]) || 0);
+            } else {
+                params.push(updates[key]);
             }
         }
+    }
 
-        if (setClauses.length === 0) {
-            throw new Error("No hay campos para actualizar.");
-        }
+    if (setClauses.length === 0) {
+        throw new Error("No hay campos para actualizar.");
+    }
 
-        params.push(id);
-        const result = await runAsync(db, `UPDATE Maquinaria SET ${setClauses.join(', ')} WHERE id = ?`, params);
+    params.push(id);
+    const sql = `UPDATE Maquinaria SET ${setClauses.join(', ')} WHERE id = ?`;
+    try {
+        const result = await runDB(sql, params);
         if (result.changes === 0) {
             throw new Error(`No se encontró Maquinaria con ID ${id} para actualizar.`);
         }
@@ -797,15 +838,13 @@ async function actualizarMaquinaria(id, updates) {
             throw new Error(`El nombre de la máquina ya existe.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function eliminarMaquinaria(id) {
-    const db = conectarDB();
+    const sql = `DELETE FROM Maquinaria WHERE id = ?`;
     try {
-        const result = await runAsync(db, `DELETE FROM Maquinaria WHERE id = ?`, [id]);
+        const result = await runDB(sql, [id]);
         if (result.changes === 0) {
             throw new Error(`No se encontró Maquinaria con ID ${id} para eliminar.`);
         }
@@ -816,37 +855,34 @@ async function eliminarMaquinaria(id) {
             throw new Error(`No se puede eliminar la máquina ID ${id} porque está asociada a un proceso de fabricación.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 // --- Recetas (Lista de Materiales - BOM) ---
 // MODIFICADA: insertarReceta para usar campos genéricos
 async function insertarReceta(recetaData) {
-    const db = conectarDB();
+    const sql = `INSERT INTO Recetas (
+        producto_terminado_id, 
+        material_tipo_generico, subtipo_material_generico, espesor_generico, ancho_generico, color_generico,
+        componente_ref_generico,
+        cantidad_requerida, unidad_medida_requerida, unidades_por_ancho_material, peso_por_unidad_producto, notas
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+        recetaData.producto_terminado_id,
+        recetaData.material_tipo_generico || null,
+        recetaData.subtipo_material_generico || null,
+        recetaData.espesor_generico || null,
+        recetaData.ancho_generico ? parseFloat(recetaData.ancho_generico) : null,
+        recetaData.color_generico || null,
+        recetaData.componente_ref_generico || null,
+        parseFloat(recetaData.cantidad_requerida) || 0,
+        recetaData.unidad_medida_requerida || 'unidad',
+        parseFloat(recetaData.unidades_por_ancho_material) || null,
+        parseFloat(recetaData.peso_por_unidad_producto) || null,
+        recetaData.notas || null
+    ];
     try {
-        const sql = `INSERT INTO Recetas (
-            producto_terminado_id, 
-            material_tipo_generico, subtipo_material_generico, espesor_generico, ancho_generico, color_generico,
-            componente_ref_generico,
-            cantidad_requerida, unidad_medida_requerida, unidades_por_ancho_material, peso_por_unidad_producto, notas
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        const params = [
-            recetaData.producto_terminado_id,
-            recetaData.material_tipo_generico || null,
-            recetaData.subtipo_material_generico || null,
-            recetaData.espesor_generico || null,
-            recetaData.ancho_generico ? parseFloat(recetaData.ancho_generico) : null,
-            recetaData.color_generico || null,
-            recetaData.componente_ref_generico || null,
-            parseFloat(recetaData.cantidad_requerida) || 0,
-            recetaData.unidad_medida_requerida || 'unidad',
-            parseFloat(recetaData.unidades_por_ancho_material) || null,
-            parseFloat(recetaData.peso_por_unidad_producto) || null,
-            recetaData.notas || null
-        ];
-        const result = await runAsync(db, sql, params);
+        const result = await runDB(sql, params);
         return result.lastID;
     } catch (error) {
         if (error.message.includes("FOREIGN KEY constraint failed")) {
@@ -856,84 +892,72 @@ async function insertarReceta(recetaData) {
             throw new Error(`Debe especificar un material genérico O un componente genérico, no ambos.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 // MODIFICADA: consultarRecetas para usar campos genéricos
 async function consultarRecetas(filtros = {}) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT r.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
-                   FROM Recetas r
-                   JOIN ProductosTerminados pt ON r.producto_terminado_id = pt.id`;
-        const params = [];
-        const whereClauses = [];
+    let sql = `SELECT r.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+                    FROM Recetas r
+                    JOIN ProductosTerminados pt ON r.producto_terminado_id = pt.id`;
+    const params = [];
+    const whereClauses = [];
 
-        if (filtros.producto_terminado_id) {
-            whereClauses.push(`r.producto_terminado_id = ?`);
-            params.push(filtros.producto_terminado_id);
-        }
-        // Filtros por campos genéricos (si se necesitan)
-        if (filtros.material_tipo_generico) {
-            whereClauses.push(`r.material_tipo_generico = ?`);
-            params.push(filtros.material_tipo_generico);
-        }
-        if (filtros.componente_ref_generico) {
-            whereClauses.push(`r.componente_ref_generico = ?`);
-            params.push(filtros.componente_ref_generico);
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        sql += ` ORDER BY pt.nombre, r.id ASC`;
-
-        return await allAsync(db, sql, params);
-    } finally {
-        db.close();
+    if (filtros.producto_terminado_id) {
+        whereClauses.push(`r.producto_terminado_id = ?`);
+        params.push(filtros.producto_terminado_id);
     }
+    // Filtros por campos genéricos (si se necesitan)
+    if (filtros.material_tipo_generico) {
+        whereClauses.push(`r.material_tipo_generico = ?`);
+        params.push(filtros.material_tipo_generico);
+    }
+    if (filtros.componente_ref_generico) {
+        whereClauses.push(`r.componente_ref_generico = ?`);
+        params.push(filtros.componente_ref_generico);
+    }
+
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    sql += ` ORDER BY pt.nombre, r.id ASC`;
+
+    return await allDB(sql, params);
 }
 
 // MODIFICADA: consultarRecetaPorId para usar campos genéricos
 async function consultarRecetaPorId(id) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT r.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
-                   FROM Recetas r
-                   JOIN ProductosTerminados pt ON r.producto_terminado_id = pt.id
-                   WHERE r.id = ?`;
-        return await getAsync(db, sql, [id]);
-    } finally {
-        db.close();
-    }
+    let sql = `SELECT r.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+                    FROM Recetas r
+                    JOIN ProductosTerminados pt ON r.producto_terminado_id = pt.id
+                    WHERE r.id = ?`;
+    return await getDB(sql, [id]);
 }
 
 // MODIFICADA: actualizarReceta para usar campos genéricos
 async function actualizarReceta(id, updates) {
-    const db = conectarDB();
-    try {
-        const setClauses = [];
-        const params = [];
+    const setClauses = [];
+    const params = [];
 
-        for (const key in updates) {
-            if (updates.hasOwnProperty(key) && key !== 'id') {
-                setClauses.push(`${key} = ?`);
-                if (['cantidad_requerida', 'unidades_por_ancho_material', 'peso_por_unidad_producto', 'ancho_generico'].includes(key)) {
-                    params.push(parseFloat(updates[key]) || null);
-                } else {
-                    params.push(updates[key]);
-                }
+    for (const key in updates) {
+        if (updates.hasOwnProperty(key) && key !== 'id') {
+            setClauses.push(`${key} = ?`);
+            if (['cantidad_requerida', 'unidades_por_ancho_material', 'peso_por_unidad_producto', 'ancho_generico'].includes(key)) {
+                params.push(parseFloat(updates[key]) || null);
+            } else {
+                params.push(updates[key]);
             }
         }
+    }
 
-        if (setClauses.length === 0) {
-            throw new Error("No hay campos para actualizar.");
-        }
+    if (setClauses.length === 0) {
+        throw new Error("No hay campos para actualizar.");
+    }
 
-        params.push(id);
-        const result = await runAsync(db, `UPDATE Recetas SET ${setClauses.join(', ')} WHERE id = ?`, params);
+    params.push(id);
+    const sql = `UPDATE Recetas SET ${setClauses.join(', ')} WHERE id = ?`;
+    try {
+        const result = await runDB(sql, params);
         if (result.changes === 0) {
             throw new Error(`No se encontró Receta con ID ${id} para actualizar.`);
         }
@@ -943,126 +967,113 @@ async function actualizarReceta(id, updates) {
             throw new Error(`Debe especificar un material genérico O un componente genérico, no ambos.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function eliminarReceta(id) {
-    const db = conectarDB();
+    const sql = `DELETE FROM Recetas WHERE id = ?`;
     try {
-        const result = await runAsync(db, `DELETE FROM Recetas WHERE id = ?`, [id]);
+        const result = await runDB(sql, [id]);
         if (result.changes === 0) {
             throw new Error(`No se encontró Receta con ID ${id} para eliminar.`);
         }
         return result.changes;
-    } finally {
-        db.close();
+    } catch (error) {
+        throw error;
     }
 }
 
 // --- ProcesosFabricacion ---
 // MODIFICADA: insertarProcesoFabricacion para incluir aplica_a_clientes
 async function insertarProcesoFabricacion(procesoData) {
-    const db = conectarDB();
+    const sql = `INSERT INTO ProcesosFabricacion (
+        producto_terminado_id, maquinaria_id, nombre_proceso,
+        tiempo_estimado_horas, aplica_a_clientes
+    ) VALUES (?, ?, ?, ?, ?)`;
+    const params = [
+        procesoData.producto_terminado_id,
+        procesoData.maquinaria_id,
+        procesoData.nombre_proceso,
+        parseFloat(procesoData.tiempo_estimado_horas) || 0,
+        procesoData.aplica_a_clientes || 'ALL' // Por defecto 'ALL'
+    ];
     try {
-        const result = await runAsync(db, `INSERT INTO ProcesosFabricacion (
-            producto_terminado_id, maquinaria_id, nombre_proceso,
-            tiempo_estimado_horas, aplica_a_clientes
-        ) VALUES (?, ?, ?, ?, ?)`, [
-            procesoData.producto_terminado_id,
-            procesoData.maquinaria_id,
-            procesoData.nombre_proceso,
-            parseFloat(procesoData.tiempo_estimado_horas) || 0,
-            procesoData.aplica_a_clientes || 'ALL' // Por defecto 'ALL'
-        ]);
+        const result = await runDB(sql, params);
         return result.lastID;
     } catch (error) {
         if (error.message.includes("FOREIGN KEY constraint failed")) {
             throw new Error(`Producto terminado o maquinaria no válida.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 // MODIFICADA: consultarProcesosFabricacion para incluir aplica_a_clientes
 async function consultarProcesosFabricacion(filtros = {}) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT pf.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia,
-                          m.nombre AS maquinaria_nombre
-                   FROM ProcesosFabricacion pf
-                   JOIN ProductosTerminados pt ON pf.producto_terminado_id = pt.id
-                   JOIN Maquinaria m ON pf.maquinaria_id = m.id`;
-        const params = [];
-        const whereClauses = [];
+    let sql = `SELECT pf.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia,
+                         m.nombre AS maquinaria_nombre
+                    FROM ProcesosFabricacion pf
+                    JOIN ProductosTerminados pt ON pf.producto_terminado_id = pt.id
+                    JOIN Maquinaria m ON pf.maquinaria_id = m.id`;
+    const params = [];
+    const whereClauses = [];
 
-        if (filtros.producto_terminado_id) {
-            whereClauses.push(`pf.producto_terminado_id = ?`);
-            params.push(filtros.producto_terminado_id);
-        }
-        if (filtros.maquinaria_id) {
-            whereClauses.push(`pf.maquinaria_id = ?`);
-            params.push(filtros.maquinaria_id);
-        }
-        if (filtros.aplica_a_clientes) { // Filtro por el nuevo campo
-            whereClauses.push(`pf.aplica_a_clientes LIKE ?`);
-            params.push(`%${filtros.aplica_a_clientes}%`);
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        sql += ` ORDER BY pt.nombre, pf.nombre_proceso ASC`;
-
-        return await allAsync(db, sql, params);
-    } finally {
-        db.close();
+    if (filtros.producto_terminado_id) {
+        whereClauses.push(`pf.producto_terminado_id = ?`);
+        params.push(filtros.producto_terminado_id);
     }
+    if (filtros.maquinaria_id) {
+        whereClauses.push(`pf.maquinaria_id = ?`);
+        params.push(filtros.maquinaria_id);
+    }
+    if (filtros.aplica_a_clientes) { // Filtro por el nuevo campo
+        whereClauses.push(`pf.aplica_a_clientes LIKE ?`);
+        params.push(`%${filtros.aplica_a_clientes}%`);
+    }
+
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    sql += ` ORDER BY pt.nombre, pf.nombre_proceso ASC`;
+
+    return await allDB(sql, params);
 }
 
 // MODIFICADA: consultarProcesoFabricacionPorId para incluir aplica_a_clientes
 async function consultarProcesoFabricacionPorId(id) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT pf.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia,
-                          m.nombre AS maquinaria_nombre
-                   FROM ProcesosFabricacion pf
-                   JOIN ProductosTerminados pt ON pf.producto_terminado_id = pt.id
-                   JOIN Maquinaria m ON pf.maquinaria_id = m.id
-                   WHERE pf.id = ?`;
-        return await getAsync(db, sql, [id]);
-    } finally {
-        db.close();
-    }
+    let sql = `SELECT pf.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia,
+                         m.nombre AS maquinaria_nombre
+                    FROM ProcesosFabricacion pf
+                    JOIN ProductosTerminados pt ON pf.producto_terminado_id = pt.id
+                    JOIN Maquinaria m ON pf.maquinaria_id = m.id
+                    WHERE pf.id = ?`;
+    return await getDB(sql, [id]);
 }
 
 // MODIFICADA: actualizarProcesoFabricacion para incluir aplica_a_clientes
 async function actualizarProcesoFabricacion(id, updates) {
-    const db = conectarDB();
-    try {
-        const setClauses = [];
-        const params = [];
+    const setClauses = [];
+    const params = [];
 
-        for (const key in updates) {
-            if (updates.hasOwnProperty(key) && key !== 'id') {
-                setClauses.push(`${key} = ?`);
-                if (key === 'tiempo_estimado_horas') {
-                    params.push(parseFloat(updates[key]) || 0);
-                } else {
-                    params.push(updates[key]);
-                }
+    for (const key in updates) {
+        if (updates.hasOwnProperty(key) && key !== 'id') {
+            setClauses.push(`${key} = ?`);
+            if (key === 'tiempo_estimado_horas') {
+                params.push(parseFloat(updates[key]) || 0);
+            } else {
+                params.push(updates[key]);
             }
         }
+    }
 
-        if (setClauses.length === 0) {
-            throw new Error("No hay campos para actualizar.");
-        }
+    if (setClauses.length === 0) {
+        throw new Error("No hay campos para actualizar.");
+    }
 
-        params.push(id);
-        const result = await runAsync(db, `UPDATE ProcesosFabricacion SET ${setClauses.join(', ')} WHERE id = ?`, params);
+    params.push(id);
+    const sql = `UPDATE ProcesosFabricacion SET ${setClauses.join(', ')} WHERE id = ?`;
+    try {
+        const result = await runDB(sql, params);
         if (result.changes === 0) {
             throw new Error(`No se encontró Proceso de Fabricación con ID ${id} para actualizar.`);
         }
@@ -1072,157 +1083,144 @@ async function actualizarProcesoFabricacion(id, updates) {
             throw new Error(`Producto terminado o maquinaria no válida.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function eliminarProcesoFabricacion(id) {
-    const db = conectarDB();
+    const sql = `DELETE FROM ProcesosFabricacion WHERE id = ?`;
     try {
-        const result = await runAsync(db, `DELETE FROM ProcesosFabricacion WHERE id = ?`, [id]);
+        const result = await runDB(sql, [id]);
         if (result.changes === 0) {
             throw new Error(`No se encontró Proceso de Fabricación con ID ${id} para eliminar.`);
         }
         return result.changes;
-    } finally {
-        db.close();
+    } catch (error) {
+        throw error;
     }
 }
 
 // --- OrdenesProduccion ---
 async function insertarOrdenProduccion(ordenData) {
-    const db = conectarDB();
+    const sql = `INSERT INTO OrdenesProduccion (
+        producto_terminado_id, cantidad_a_producir, fecha, observaciones
+    ) VALUES (?, ?, ?, ?)`;
+    const params = [
+        ordenData.producto_terminado_id,
+        parseFloat(ordenData.cantidad_a_producir) || 0,
+        ordenData.fecha || new Date().toISOString().split('T')[0],
+        ordenData.observaciones || null
+    ];
     try {
-        const result = await runAsync(db, `INSERT INTO OrdenesProduccion (
-            producto_terminado_id, cantidad_a_producir, fecha, observaciones
-        ) VALUES (?, ?, ?, ?)`, [
-            ordenData.producto_terminado_id,
-            parseFloat(ordenData.cantidad_a_producir) || 0,
-            ordenData.fecha || new Date().toISOString().split('T')[0],
-            ordenData.observaciones || null
-        ]);
+        const result = await runDB(sql, params);
         return result.lastID;
     } catch (error) {
         if (error.message.includes("FOREIGN KEY constraint failed")) {
             throw new Error(`Producto terminado no válido.`);
         }
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function consultarOrdenesProduccion(filtros = {}) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT op.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
-                   FROM OrdenesProduccion op
-                   JOIN ProductosTerminados pt ON op.producto_terminado_id = pt.id`;
-        const params = [];
-        const whereClauses = [];
+    let sql = `SELECT op.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+                    FROM OrdenesProduccion op
+                    JOIN ProductosTerminados pt ON op.producto_terminado_id = pt.id`;
+    const params = [];
+    const whereClauses = [];
 
-        if (filtros.producto_id) {
-            whereClauses.push(`op.producto_terminado_id = ?`);
-            params.push(filtros.producto_id);
-        }
-        if (filtros.fecha_desde) {
-            whereClauses.push(`op.fecha >= ?`);
-            params.push(filtros.fecha_desde);
-        }
-        if (filtros.fecha_hasta) {
-            whereClauses.push(`op.fecha <= ?`);
-            params.push(filtros.fecha_hasta);
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        sql += ` ORDER BY op.fecha DESC, op.id DESC`;
-
-        return await allAsync(db, sql, params);
-    } finally {
-        db.close();
+    if (filtros.producto_id) {
+        whereClauses.push(`op.producto_terminado_id = ?`);
+        params.push(filtros.producto_id);
     }
+    if (filtros.fecha_desde) {
+        whereClauses.push(`op.fecha >= ?`);
+        params.push(filtros.fecha_desde);
+    }
+    if (filtros.fecha_hasta) {
+        whereClauses.push(`op.fecha <= ?`);
+        params.push(filtros.fecha_hasta);
+    }
+
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    sql += ` ORDER BY op.fecha DESC, op.id DESC`;
+
+    return await allDB(sql, params);
 }
 
 async function consultarOrdenProduccionPorId(id) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT op.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
-                   FROM OrdenesProduccion op
-                   JOIN ProductosTerminados pt ON op.producto_terminado_id = pt.id
-                   WHERE op.id = ?`;
-        return await getAsync(db, sql, [id]);
-    } finally {
-        db.close();
-    }
+    let sql = `SELECT op.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+                    FROM OrdenesProduccion op
+                    JOIN ProductosTerminados pt ON op.producto_terminado_id = pt.id
+                    WHERE op.id = ?`;
+    return await getDB(sql, [id]);
 }
 
 async function actualizarOrdenProduccion(id, updates) {
-    const db = conectarDB();
-    try {
-        const setClauses = [];
-        const params = [];
+    const setClauses = [];
+    const params = [];
 
-        for (const key in updates) {
-            if (updates.hasOwnProperty(key) && key !== 'id') {
-                setClauses.push(`${key} = ?`);
-                if (key === 'cantidad_a_producir' || key === 'coste_real_fabricacion') {
-                    params.push(parseFloat(updates[key]) || 0);
-                } else {
-                    params.push(updates[key]);
-                }
+    for (const key in updates) {
+        if (updates.hasOwnProperty(key) && key !== 'id') {
+            setClauses.push(`${key} = ?`);
+            if (key === 'cantidad_a_producir' || key === 'coste_real_fabricacion') {
+                params.push(parseFloat(updates[key]) || 0);
+            } else {
+                params.push(updates[key]);
             }
         }
+    }
 
-        if (setClauses.length === 0) {
-            throw new Error("No hay campos para actualizar.");
-        }
+    if (setClauses.length === 0) {
+        throw new Error("No hay campos para actualizar.");
+    }
 
-        params.push(id);
-        const result = await runAsync(db, `UPDATE OrdenesProduccion SET ${setClauses.join(', ')} WHERE id = ?`, params);
+    params.push(id);
+    const sql = `UPDATE OrdenesProduccion SET ${setClauses.join(', ')} WHERE id = ?`;
+    try {
+        const result = await runDB(sql, params);
         if (result.changes === 0) {
             throw new Error(`No se encontró Orden de Producción con ID ${id} para actualizar.`);
         }
         return result.changes;
     } catch (error) {
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function eliminarOrdenProduccion(id) {
-    const db = conectarDB();
+    const sql = `DELETE FROM OrdenesProduccion WHERE id = ?`;
     try {
-        const result = await runAsync(db, `DELETE FROM OrdenesProduccion WHERE id = ?`, [id]);
+        const result = await runDB(sql, [id]);
         if (result.changes === 0) {
             throw new Error(`No se encontró Orden de Producción con ID ${id} para eliminar.`);
         }
         return result.changes;
-    } finally {
-        db.close();
+    } catch (error) {
+        throw error;
     }
 }
 
 // --- StockProductosTerminados ---
 async function insertarStockProductoTerminado(dbInstance, stockData) {
+    const sql = `INSERT INTO StockProductosTerminados (
+        producto_id, orden_produccion_id, cantidad_actual, unidad_medida,
+        coste_unitario_final, fecha_entrada_almacen, status, ubicacion, notas
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+        stockData.producto_id,
+        stockData.orden_produccion_id || null,
+        parseFloat(stockData.cantidad_actual) || 0,
+        stockData.unidad_medida || 'unidad',
+        parseFloat(stockData.coste_unitario_final) || 0,
+        stockData.fecha_entrada_almacen || new Date().toISOString().split('T')[0],
+        stockData.status || 'DISPONIBLE',
+        stockData.ubicacion || null,
+        stockData.notas || null
+    ];
     try {
-        const result = await runAsync(dbInstance, `INSERT INTO StockProductosTerminados (
-            producto_id, orden_produccion_id, cantidad_actual, unidad_medida,
-            coste_unitario_final, fecha_entrada_almacen, status, ubicacion, notas
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-            stockData.producto_id,
-            stockData.orden_produccion_id || null,
-            parseFloat(stockData.cantidad_actual) || 0,
-            stockData.unidad_medida || 'unidad',
-            parseFloat(stockData.coste_unitario_final) || 0,
-            stockData.fecha_entrada_almacen || new Date().toISOString().split('T')[0],
-            stockData.status || 'DISPONIBLE',
-            stockData.ubicacion || null,
-            stockData.notas || null
-        ]);
+        const result = await runAsync(dbInstance, sql, params);
         return result.lastID;
     } catch (error) {
         if (error.message.includes("FOREIGN KEY constraint failed")) {
@@ -1233,95 +1231,83 @@ async function insertarStockProductoTerminado(dbInstance, stockData) {
 }
 
 async function consultarStockProductosTerminados(filtros = {}) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT spt.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
-                   FROM StockProductosTerminados spt
-                   JOIN ProductosTerminados pt ON spt.producto_id = pt.id`;
-        const params = [];
-        const whereClauses = [];
+    let sql = `SELECT spt.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+                    FROM StockProductosTerminados spt
+                    JOIN ProductosTerminados pt ON spt.producto_id = pt.id`;
+    const params = [];
+    const whereClauses = [];
 
-        if (filtros.producto_id) {
-            whereClauses.push(`spt.producto_id = ?`);
-            params.push(filtros.producto_id);
-        }
-        if (filtros.status) {
-            whereClauses.push(`spt.status = ?`);
-            params.push(filtros.status.toUpperCase());
-        }
-        if (filtros.referencia_like) {
-            whereClauses.push(`pt.referencia LIKE ?`);
-            params.push(`%${filtros.referencia_like}%`);
-        }
-
-        if (whereClauses.length > 0) {
-            sql += ` WHERE ${whereClauses.join(' AND ')}`;
-        }
-        sql += ` ORDER BY pt.nombre, spt.fecha_entrada_almacen DESC`;
-
-        return await allAsync(db, sql, params);
-    } finally {
-        db.close();
+    if (filtros.producto_id) {
+        whereClauses.push(`spt.producto_id = ?`);
+        params.push(filtros.producto_id);
     }
+    if (filtros.status) {
+        whereClauses.push(`spt.status = ?`);
+        params.push(filtros.status.toUpperCase());
+    }
+    if (filtros.referencia_like) {
+        whereClauses.push(`pt.referencia LIKE ?`);
+        params.push(`%${filtros.referencia_like}%`);
+    }
+
+    if (whereClauses.length > 0) {
+        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    sql += ` ORDER BY pt.nombre, spt.fecha_entrada_almacen DESC`;
+
+    return await allDB(sql, params);
 }
 
 async function consultarStockProductoTerminadoPorId(id) {
-    const db = conectarDB();
-    try {
-        let sql = `SELECT spt.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
-                   FROM StockProductosTerminados spt
-                   JOIN ProductosTerminados pt ON spt.producto_id = pt.id
-                   WHERE spt.id = ?`;
-        return await getAsync(db, sql, [id]);
-    } finally {
-        db.close();
-    }
+    let sql = `SELECT spt.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+                    FROM StockProductosTerminados spt
+                    JOIN ProductosTerminados pt ON spt.producto_id = pt.id
+                    WHERE spt.id = ?`;
+    return await getDB(sql, [id]);
 }
 
 async function actualizarStockProductoTerminado(id, updates) {
-    const db = conectarDB();
-    try {
-        const setClauses = [];
-        const params = [];
+    const setClauses = [];
+    const params = [];
 
-        for (const key in updates) {
-            if (updates.hasOwnProperty(key) && key !== 'id') {
-                setClauses.push(`${key} = ?`);
-                if (key === 'cantidad_actual' || key === 'coste_unitario_final') {
-                    params.push(parseFloat(updates[key]) || 0);
-                } else {
-                    params.push(updates[key]);
-                }
+    for (const key in updates) {
+        if (updates.hasOwnProperty(key) && key !== 'id') {
+            setClauses.push(`${key} = ?`);
+            if (key === 'cantidad_actual' || key === 'coste_unitario_final') {
+                params.push(parseFloat(updates[key]) || 0);
+            } else {
+                params.push(updates[key]);
             }
         }
+    }
 
-        if (setClauses.length === 0) {
-            throw new Error("No hay campos para actualizar.");
-        }
+    if (setClauses.length === 0) {
+        throw new Error("No hay campos para actualizar.");
+    }
 
-        params.push(id);
-        const result = await runAsync(db, `UPDATE StockProductosTerminados SET ${setClauses.join(', ')} WHERE id = ?`, params);
+    params.push(id);
+    const sql = `UPDATE StockProductosTerminados SET ${setClauses.join(', ')} WHERE id = ?`;
+    try {
+        const result = await runDB(sql, params);
         if (result.changes === 0) {
             throw new Error(`No se encontró Stock de Producto Terminado con ID ${id} para actualizar.`);
         }
         return result.changes;
     } catch (error) {
         throw error;
-    } finally {
-        db.close();
     }
 }
 
 async function eliminarStockProductoTerminado(id) {
-    const db = conectarDB();
+    const sql = `DELETE FROM StockProductosTerminados WHERE id = ?`;
     try {
-        const result = await runAsync(db, `DELETE FROM StockProductosTerminados WHERE id = ?`, [id]);
+        const result = await runDB(sql, [id]);
         if (result.changes === 0) {
             throw new Error(`No se encontró Stock de Producto Terminado con ID ${id} para eliminar.`);
         }
         return result.changes;
-    } finally {
-        db.close();
+    } catch (error) {
+        throw error;
     }
 }
 
@@ -1369,7 +1355,6 @@ async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) 
     return 0;
 }
 
-
 /**
  * Calcula el coste de materiales para un producto terminado basado en su receta genérica.
  * Usa el último coste conocido de los materiales genéricos.
@@ -1395,7 +1380,12 @@ async function calcularCosteMateriales(dbInstance, productoTerminadoId) {
         
         let costeMaterialPorUnidadPT = costeUnitarioGenerico;
         if (receta.material_tipo_generico) { // Si es materia prima (bobina), aplicar aprovechamiento de ancho
-            costeMaterialPorUnidadPT = costeUnitarioGenerico / unidadesPorAncho;
+            // Si el coste unitario es por metro lineal y la receta requiere un ancho, ajustar.
+            // Esto es una simplificación. La lógica real depende de cómo se almacena el coste unitario.
+            // Si coste_unitario_final es por metro cuadrado, entonces:
+            // costeMaterialPorUnidadPT = costeUnitarioGenerico * (receta.ancho_generico || 1);
+            // Si es por metro lineal y el producto consume un ancho específico:
+            costeMaterialPorUnidadPT = (costeUnitarioGenerico / unidadesPorAncho); // Coste por unidad de producto terminado
         }
         costeTotalMateriales += cantidadRequerida * costeMaterialPorUnidadPT;
     }
@@ -1438,7 +1428,7 @@ async function calcularCosteProcesos(dbInstance, productoTerminadoId, configurac
  * @returns {Promise<number>} El coste de fabricación estándar calculado.
  */
 async function actualizarCosteFabricacionEstandar(productoTerminadoId, configuraciones) {
-    const db = conectarDB();
+    const db = conectarDB(); // Conexión para la transacción
     try {
         const producto = await getAsync(db, `SELECT coste_extra_unitario FROM ProductosTerminados WHERE id = ?`, [productoTerminadoId]);
         if (!producto) {
@@ -1457,7 +1447,7 @@ async function actualizarCosteFabricacionEstandar(productoTerminadoId, configura
         console.error(`Error al actualizar coste de fabricación estándar para producto ${productoTerminadoId}:`, error.message);
         throw error;
     } finally {
-        db.close();
+        db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
 
@@ -1471,7 +1461,7 @@ async function actualizarCosteFabricacionEstandar(productoTerminadoId, configura
  * @returns {Promise<object>} Resumen de la operación.
  */
 async function procesarOrdenProduccion(ordenProduccionId, configuraciones) {
-    const db = conectarDB();
+    const db = conectarDB(); // Conexión para la transacción
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
@@ -1491,7 +1481,7 @@ async function procesarOrdenProduccion(ordenProduccionId, configuraciones) {
 
         const productoTerminado = await getAsync(db, `SELECT * FROM ProductosTerminados WHERE id = ?`, [orden.producto_terminado_id]);
         if (!productoTerminado) {
-            throw new Error(`Producto terminado ID ${orden.producto_terminado_id} no encontrado para la orden.`);
+            throw new Error(`Producto terminado asociado a la orden ID ${ordenProduccionId} no encontrado.`);
         }
 
         const recetas = await allAsync(db, `
@@ -1667,88 +1657,79 @@ async function procesarOrdenProduccion(ordenProduccionId, configuraciones) {
         await runAsync(db, 'ROLLBACK;');
         throw error;
     } finally {
-        db.close();
+        db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
 
 // --- NUEVA FUNCIÓN: Obtener materiales genéricos con su último coste ---
 async function obtenerMaterialesGenericos() {
-    const db = conectarDB();
-    try {
-        const materiales = [];
+    // Obtener la última entrada de cada referencia_stock de materias primas
+    const materiasPrimas = await allDB(`
+        SELECT
+            s.id,
+            s.referencia_stock,
+            s.material_tipo,
+            s.subtipo_material,
+            s.espesor,
+            s.ancho,
+            s.color,
+            s.unidad_medida,
+            s.coste_unitario_final,
+            s.peso_total_kg
+        FROM StockMateriasPrimas s
+        WHERE s.id IN (
+            SELECT MAX(s2.id)
+            FROM StockMateriasPrimas s2
+            GROUP BY s2.referencia_stock
+        )
+        ORDER BY s.referencia_stock;
+    `);
 
-        // Obtener la última entrada de cada referencia_stock de materias primas
-        const materiasPrimas = await allAsync(db, `
-            SELECT
-                s.id,
-                s.referencia_stock,
-                s.material_tipo,
-                s.subtipo_material,
-                s.espesor,
-                s.ancho,
-                s.color,
-                s.unidad_medida,
-                s.coste_unitario_final,
-                s.peso_total_kg
-            FROM StockMateriasPrimas s
-            WHERE s.id IN (
-                SELECT MAX(s2.id)
-                FROM StockMateriasPrimas s2
-                GROUP BY s2.referencia_stock
-            )
-            ORDER BY s.referencia_stock;
-        `);
+    const materiales = materiasPrimas.map(mp => ({
+        type: 'materia_prima',
+        id: mp.id, // ID del ítem de stock específico (para selección en presupuesto)
+        referencia_stock: mp.referencia_stock,
+        material_tipo: mp.material_tipo,
+        subtipo_material: mp.subtipo_material,
+        espesor: mp.espesor,
+        ancho: mp.ancho,
+        color: mp.color,
+        unidad_medida: mp.unidad_medida,
+        coste_unitario_final: mp.coste_unitario_final,
+        peso_total_kg: mp.peso_total_kg,
+        display: `${mp.referencia_stock} (${mp.material_tipo} ${mp.espesor || ''} ${mp.ancho || ''}mm ${mp.color || ''}) - Último Coste: ${parseFloat(mp.coste_unitario_final || 0).toFixed(4)}€`
+    }));
 
-        materiasPrimas.forEach(mp => {
-            materiales.push({
-                type: 'materia_prima',
-                id: mp.id, // ID del ítem de stock específico (para selección en presupuesto)
-                referencia_stock: mp.referencia_stock,
-                material_tipo: mp.material_tipo,
-                subtipo_material: mp.subtipo_material,
-                espesor: mp.espesor,
-                ancho: mp.ancho,
-                color: mp.color,
-                unidad_medida: mp.unidad_medida,
-                coste_unitario_final: mp.coste_unitario_final,
-                peso_total_kg: mp.peso_total_kg,
-                display: `${mp.referencia_stock} (${mp.material_tipo} ${mp.espesor || ''} ${mp.ancho || ''}mm ${mp.color || ''}) - Último Coste: ${parseFloat(mp.coste_unitario_final || 0).toFixed(4)}€`
-            });
+    // Obtener la última entrada de cada componente_ref de componentes
+    const componentes = await allDB(`
+        SELECT
+            c.id,
+            c.componente_ref,
+            c.descripcion,
+            c.unidad_medida,
+            c.coste_unitario_final
+        FROM StockComponentes c
+        WHERE c.id IN (
+            SELECT MAX(c2.id)
+            FROM StockComponentes c2
+            GROUP BY c2.componente_ref
+        )
+        ORDER BY c.componente_ref;
+    `);
+
+    componentes.forEach(comp => {
+        materiales.push({
+            type: 'componente',
+            id: comp.id, // ID del ítem de stock específico (para selección en presupuesto)
+            componente_ref: comp.componente_ref,
+            descripcion: comp.descripcion,
+            unidad_medida: comp.unidad_medida,
+            coste_unitario_final: comp.coste_unitario_final,
+            display: `${comp.componente_ref} (${comp.descripcion}) - Último Coste: ${parseFloat(comp.coste_unitario_final || 0).toFixed(4)}€`
         });
+    });
 
-        // Obtener la última entrada de cada componente_ref de componentes
-        const componentes = await allAsync(db, `
-            SELECT
-                c.id,
-                c.componente_ref,
-                c.descripcion,
-                c.unidad_medida,
-                c.coste_unitario_final
-            FROM StockComponentes c
-            WHERE c.id IN (
-                SELECT MAX(c2.id)
-                FROM StockComponentes c2
-                GROUP BY c2.componente_ref
-            )
-            ORDER BY c.componente_ref;
-        `);
-
-        componentes.forEach(comp => {
-            materiales.push({
-                type: 'componente',
-                id: comp.id, // ID del ítem de stock específico (para selección en presupuesto)
-                componente_ref: comp.componente_ref,
-                descripcion: comp.descripcion,
-                unidad_medida: comp.unidad_medida,
-                coste_unitario_final: comp.coste_unitario_final,
-                display: `${comp.componente_ref} (${comp.descripcion}) - Último Coste: ${parseFloat(comp.coste_unitario_final || 0).toFixed(4)}€`
-            });
-        });
-
-        return materiales;
-    } finally {
-        db.close();
-    }
+    return materiales;
 }
 
 // MODIFICADA: consultarReferenciasStockConUltimoCoste - ahora es un alias de obtenerMaterialesGenericos
@@ -1770,7 +1751,7 @@ async function consultarReferenciasStockConUltimoCoste() {
  * @returns {Promise<object>} Objeto con el desglose del presupuesto.
  */
 async function calcularPresupuestoProductoTerminado(productoId, cantidad, tipoCliente, materialesSeleccionadosStock, configuraciones) {
-    const db = conectarDB();
+    const db = conectarDB(); // Conexión para la transacción
     try {
         const producto = await getAsync(db, `SELECT * FROM ProductosTerminados WHERE id = ?`, [productoId]);
         if (!producto) {
@@ -1801,21 +1782,20 @@ async function calcularPresupuestoProductoTerminado(productoId, cantidad, tipoCl
 
             if (receta.material_tipo_generico) {
                 // Buscar el ID de stock de materia prima seleccionado por el usuario para esta receta
-                const selectedStockId = materialesSeleccionadosStock.find(m => 
+                const selectedStockItemData = materialesSeleccionadosStock.find(m => 
                     m.type === 'materia_prima' && 
-                    (m.material_tipo === receta.material_tipo_generico &&
-                     (m.subtipo_material === receta.subtipo_material_generico || (m.subtipo_material === null && receta.subtipo_material_generico === null)) &&
-                     (m.espesor === receta.espesor_generico || (m.espesor === null && receta.espesor_generico === null)) &&
-                     (m.ancho === receta.ancho_generico || (m.ancho === null && receta.ancho_generico === null)) &&
-                     (m.color === receta.color_generico || (m.color === null && receta.color_generico === null))
-                    )?.id);
+                    m.material_tipo === receta.material_tipo_generico &&
+                    (m.espesor === receta.espesor_generico || (m.espesor === null && receta.espesor_generico === null)) &&
+                    (m.ancho === receta.ancho_generico || (m.ancho === null && receta.ancho_generico === null)) &&
+                    (m.color === receta.color_generico || (m.color === null && receta.color_generico === null))
+                );
 
-                if (!selectedStockId) {
+                if (!selectedStockItemData || !selectedStockItemData.id) {
                     throw new Error(`No se seleccionó una bobina específica para la materia prima genérica: ${receta.material_tipo_generico} ${receta.espesor_generico} ${receta.ancho_generico}mm.`);
                 }
-                const stockItem = await getAsync(db, `SELECT * FROM StockMateriasPrimas WHERE id = ?`, [selectedStockId]);
+                const stockItem = await getAsync(db, `SELECT * FROM StockMateriasPrimas WHERE id = ?`, [selectedStockItemData.id]);
                 if (!stockItem) {
-                    throw new Error(`Bobina seleccionada con ID ${selectedStockId} no encontrada en stock.`);
+                    throw new Error(`Bobina seleccionada con ID ${selectedStockItemData.id} no encontrada en stock.`);
                 }
                 stockItemSeleccionado = stockItem;
                 costeUnitarioRealDeStock = parseFloat(stockItem.coste_unitario_final) || 0;
@@ -1823,21 +1803,24 @@ async function calcularPresupuestoProductoTerminado(productoId, cantidad, tipoCl
 
             } else if (receta.componente_ref_generico) {
                 // Buscar el ID de stock de componente seleccionado por el usuario para esta receta
-                const selectedStockId = materialesSeleccionadosStock.find(m => 
+                const selectedStockItemData = materialesSeleccionadosStock.find(m => 
                     m.type === 'componente' && 
                     m.componente_ref === receta.componente_ref_generico
-                )?.id;
+                );
 
-                if (!selectedStockId) {
+                if (!selectedStockItemData || !selectedStockItemData.id) {
                     throw new Error(`No se seleccionó un componente específico para el componente genérico: ${receta.componente_ref_generico}.`);
                 }
-                const stockItem = await getAsync(db, `SELECT * FROM StockComponentes WHERE id = ?`, [selectedStockId]);
+                const stockItem = await getAsync(db, `SELECT * FROM StockComponentes WHERE id = ?`, [selectedStockItemData.id]);
                 if (!stockItem) {
-                    throw new Error(`Componente seleccionado con ID ${selectedStockId} no encontrado en stock.`);
+                    throw new Error(`Componente seleccionado con ID ${selectedStockItemData.id} no encontrado en stock.`);
                 }
                 stockItemSeleccionado = stockItem;
                 costeUnitarioRealDeStock = parseFloat(stockItem.coste_unitario_final) || 0;
                 cantidadConsumirSimulada = cantidadTotalNecesariaParaPresupuesto; // No hay aprovechamiento de ancho para componentes
+            } else {
+                console.warn(`Receta ID ${receta.id} no tiene material genérico ni componente genérico. Ignorando.`);
+                continue;
             }
 
             if (stockItemSeleccionado) {
@@ -1938,9 +1921,12 @@ async function calcularPresupuestoProductoTerminado(productoId, cantidad, tipoCl
         console.error(`Error al calcular presupuesto para producto ${productoId}:`, error.message);
         throw error;
     } finally {
-        db.close();
+        db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
+
+
+
 
 // --- Funciones para la configuración (leer/escribir config.json) ---
 async function obtenerConfiguracion() {
@@ -1962,8 +1948,6 @@ async function actualizarConfiguracion(newConfig) {
         throw new Error("No se pudo guardar la configuración.");
     }
 }
-
-
 
 
 // --- EXPORTACIONES ---
@@ -2017,8 +2001,9 @@ module.exports = {
     actualizarCosteFabricacionEstandar,
 
     consultarReferenciasStockConUltimoCoste,
-    obtenerMaterialesGenericos, // Exportar la nueva función
-    calcularPresupuestoProductoTerminado, // Exportar la nueva función
+    obtenerMaterialesGenericos,
+    calcularPresupuestoProductoTerminado,
+    calcularCosteMaterialEspecifico, // Asegúrate de exportar esta nueva función de cálculo
 
     obtenerConfiguracion,
     actualizarConfiguracion

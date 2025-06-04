@@ -185,7 +185,8 @@ function App() {
       console.error(`Error al cambiar estado del item ${stockItemId}:`, err);
       setUpdateStatusError(err.message);
     } finally {
-      setLoading(false);
+      // No hay setLoading(false) aquí, ya que fetchStockAndProcess() ya maneja el loading.
+      // Si fetchStockAndProcess no se llama, entonces sí sería necesario un setLoading(false)
     }
   };
 
@@ -324,7 +325,8 @@ function App() {
 
         <div className="sidebar-section">
           <h3>Fabricación y Productos Finales</h3>
-          <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión Productos y Recetas</button>
+          {/* CAMBIO DE TEXTO AQUÍ */}
+          <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Crear nuevo producto</button>
           <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
           <button onClick={() => setVistaActual('PROCESOS_FABRICACION')} disabled={vistaActual === 'PROCESOS_FABRICACION'}>Gestión Procesos</button>
           <button onClick={() => setVistaActual('ORDENES_PRODUCCION')} disabled={vistaActual === 'ORDENES_PRODUCCION'}>Órdenes Producción</button>
