@@ -563,48 +563,82 @@ async function eliminarPedidoCompleto(pedidoId) {
 }
 
 
-async function insertarProductoTerminado(productoData) {
-    const { referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
+async function insertarProductoTerminado(dbInstance, productoData) {
+    const { nombre, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final, coste_extra_unitario } = productoData;
     const fecha_creacion = new Date().toISOString().split('T')[0];
 
+    // Query AHORA incluye 'referencia' y se le pasará NULL.
     const query = `INSERT INTO ProductosTerminados (
-        referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
-        material_principal, espesor_principal, ancho_final, largo_final
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        referencia, nombre, unidad_medida, coste_fabricacion_estandar, fecha_creacion, status,
+        material_principal, espesor_principal, ancho_final, largo_final, coste_extra_unitario
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; // 11 placeholders
 
     const params = [
-        referencia,
+        null, // Valor para 'referencia'
         nombre,
-        descripcion,
-        unidad_medida || 'unidad', // Valor por defecto si no se provee
-        parseFloat(coste_fabricacion_estandar) || 0, // Asegurar que es un número
+        unidad_medida || 'unidad',
+        parseFloat(coste_fabricacion_estandar) || 0,
         fecha_creacion,
-        status || 'ACTIVO', // Valor por defecto
+        status || 'ACTIVO',
         material_principal,
         espesor_principal,
-        parseFloat(ancho_final) || null, // Asegurar que es un número o null
-        parseFloat(largo_final) || null  // Asegurar que es un número o null
+        parseFloat(ancho_final) || null,
+        parseFloat(largo_final) || null,
+        parseFloat(coste_extra_unitario) || 0
     ];
 
     try {
-        // Usar el helper runDB que maneja la conexión y el cierre
-        const result = await runDB(query, params);
+        const result = await runAsync(dbInstance, query, params); // Usa runAsync con la instancia db
         return result.lastID;
     } catch (err) {
-        console.error("Error al insertar producto terminado:", err.message);
-        if (err.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
-            // Es importante relanzar para que el endpoint pueda manejar el error HTTP correcto
-            throw new Error("La referencia del producto terminado ya existe.");
-        }
-        throw err; // Relanzar otros errores
+        console.error("Error al insertar producto terminado (datos básicos):", err.message, err.stack);
+        // No lanzar error de UNIQUE para referencia aquí, ya que es NULL.
+        // Se pueden manejar otros errores UNIQUE (ej. si nombre fuera UNIQUE en el futuro)
+        throw err;
     }
 }
 
-// Modificada para seleccionar los nuevos campos
+// Nueva función para actualizar la referencia generada
+async function actualizarReferenciaProductoTerminado(dbInstance, productoId, referencia) {
+    const query = `UPDATE ProductosTerminados SET referencia = ? WHERE id = ?`;
+    try {
+        const result = await runAsync(dbInstance, query, [referencia, productoId]);
+        if (result.changes === 0) {
+            throw new Error(`No se encontró Producto Terminado con ID ${productoId} para actualizar su referencia.`);
+        }
+    } catch (err) {
+        console.error(`Error al actualizar referencia para producto ID ${productoId}:`, err.message, err.stack);
+        // Podría ser un error de UNIQUE si algo sale mal con la generación y se repite la referencia.
+        if (err.message && err.message.toUpperCase().includes("UNIQUE CONSTRAINT FAILED") && err.message.includes("ProductosTerminados.referencia")) {
+            throw new Error(`La referencia generada '${referencia}' ya existe para otro producto.`);
+        }
+        throw err;
+    }
+}
+
+
+// Nueva función para actualizar la referencia generada
+async function actualizarReferenciaProductoTerminado(dbInstance, productoId, referencia) {
+    const query = `UPDATE ProductosTerminados SET referencia = ? WHERE id = ?`;
+    try {
+        await runAsync(dbInstance, query, [referencia, productoId]);
+    } catch (err) {
+        console.error(`Error al actualizar referencia para producto ID ${productoId}:`, err.message);
+        throw err; // Podría ser un error de UNIQUE si algo sale mal con la generación
+    }
+}
+
+
+// backend-node/db_operations.js
+// ...
+
+// backend-node/db_operations.js
+// ... (otras funciones como allDB)
+
 async function consultarProductosTerminados(filtros = {}) {
-    let query = `SELECT id, referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status,
-                         material_principal, espesor_principal, ancho_final, largo_final
-                         FROM ProductosTerminados`;
+    let query = `SELECT id, referencia, nombre, unidad_medida, coste_fabricacion_estandar, status,
+                         material_principal, espesor_principal, ancho_final, largo_final, coste_extra_unitario, fecha_creacion
+                         FROM ProductosTerminados`; // 'descripcion' ya no está
     const params = [];
     const conditions = [];
 
@@ -612,140 +646,135 @@ async function consultarProductosTerminados(filtros = {}) {
         conditions.push(`status = ?`);
         params.push(filtros.status);
     }
-    // Puedes añadir más filtros aquí si los necesitas
+    // Añadir más filtros si es necesario
 
     if (conditions.length > 0) {
         query += ` WHERE ` + conditions.join(' AND ');
     }
+    query += ` ORDER BY nombre ASC`;
 
-    // Utiliza la función helper allDB que maneja la conexión y cierre
     try {
         const rows = await allDB(query, params);
         return rows;
     } catch (error) {
-        console.error("Error al consultar productos terminados:", error.message);
-        // Lanza el error para que sea capturado por el endpoint en server.js
+        console.error("Error al consultar productos terminados:", error.message, error.stack);
         throw error;
     }
 }
 
-// Modificada para seleccionar los nuevos campos
+
 async function consultarProductoTerminadoPorId(id) {
-    return new Promise((resolve, reject) => {
-        const query = `SELECT id, referencia, nombre, descripcion, unidad_medida, coste_fabricacion_estandar, status,
-                       material_principal, espesor_principal, ancho_final, largo_final
-                       FROM ProductosTerminados WHERE id = ?`;
-        db.get(query, [id], (err, row) => {
-            if (err) {
-                console.error("Error al consultar producto terminado por ID:", err.message);
-                return reject(err);
-            }
-            resolve(row);
-        });
-    });
+    const query = `SELECT id, referencia, nombre, unidad_medida, coste_fabricacion_estandar, status,
+                       material_principal, espesor_principal, ancho_final, largo_final, coste_extra_unitario, fecha_creacion
+                       FROM ProductosTerminados WHERE id = ?`; // 'descripcion' ya no está
+    try {
+        const row = await getDB(query, [id]);
+        return row;
+    } catch (error) {
+        console.error("Error al consultar producto terminado por ID:", error.message, error.stack);
+        throw error;
+    }
 }
 
-// Modificada para permitir la actualización de los nuevos campos
+
+
 async function actualizarProductoTerminado(id, updates) {
-    return new Promise((resolve, reject) => {
-        const setParts = [];
-        const params = [];
-        for (const key in updates) {
-            // Asegúrate de que solo actualizas campos válidos
-            if (['referencia', 'nombre', 'descripcion', 'unidad_medida', 'coste_fabricacion_estandar', 'status',
-                 'material_principal', 'espesor_principal', 'ancho_final', 'largo_final'].includes(key)) {
-                setParts.push(`${key} = ?`);
+    const setParts = [];
+    const params = [];
+    const camposValidos = [
+        'nombre', 'unidad_medida', 'status',
+        'material_principal', 'espesor_principal', 
+        'ancho_final', 'largo_final', 'coste_extra_unitario'
+        // 'coste_fabricacion_estandar' no se actualiza directamente aquí, sino por su propia lógica
+    ];
+    
+    for (const key in updates) {
+        if (camposValidos.includes(key)) {
+            setParts.push(`${key} = ?`);
+            if (['ancho_final', 'largo_final', 'coste_extra_unitario'].includes(key)) {
+                params.push(updates[key] !== null && updates[key] !== '' && !isNaN(parseFloat(updates[key])) ? parseFloat(updates[key]) : null);
+            } else {
                 params.push(updates[key]);
             }
         }
-        if (setParts.length === 0) {
-            return reject(new Error("No se proporcionaron campos válidos para actualizar."));
+    }
+
+    if (setParts.length === 0) {
+        // Si no hay campos válidos, podríamos optar por no hacer nada o devolver un mensaje.
+        // Por ahora, si se llama sin campos válidos, la query fallará o no hará cambios.
+        // Considerar devolver un error o un mensaje si setParts está vacío.
+        console.log("actualizarProductoTerminado: No hay campos válidos para actualizar.");
+        return 0; // Indica que no se hicieron cambios
+    }
+
+    params.push(id);
+    const query = `UPDATE ProductosTerminados SET ${setParts.join(', ')} WHERE id = ?`;
+    
+    try {
+        const result = await runDB(query, params); // runDB maneja la conexión y cierre
+        // No se considera un error si changes es 0, ya que los datos podrían ser iguales.
+        // if (result.changes === 0) {
+        // throw new Error("Producto terminado no encontrado para actualizar o datos sin cambios.");
+        // }
+        return result.changes; 
+    } catch (err) {
+        console.error("Error al actualizar producto terminado:", err.message, err.stack);
+        if (err.message && err.message.toUpperCase().includes("UNIQUE CONSTRAINT FAILED") && err.message.includes("ProductosTerminados.nombre")) { // Ejemplo si nombre fuera UNIQUE
+            throw new Error("El nombre de la plantilla de producto ya existe.");
         }
-        params.push(id);
-        const query = `UPDATE ProductosTerminados SET ${setParts.join(', ')} WHERE id = ?`;
-        db.run(query, params, function(err) {
-            if (err) {
-                console.error("Error al actualizar producto terminado:", err.message);
-                if (err.message.includes("UNIQUE constraint failed: ProductosTerminados.referencia")) {
-                    return reject(new Error("La referencia del producto terminado ya existe."));
-                }
-                return reject(err);
-            }
-            resolve(this.changes);
-        });
-    });
+        throw err;
+    }
 }
 
-// ... (tu función eliminarProductoTerminado se mantiene igual)
 
-// --- NUEVA FUNCIÓN PARA CALCULAR COSTE DE MATERIAL ESPECÍFICO ---
-// Esta función es un ejemplo y debe ser adaptada a tu lógica de negocio
-// y a la estructura de tu tabla StockMateriasPrimas.
-async function calcularCosteMaterialEspecifico(material_tipo, espesor, ancho, largo, appConfig) {
+
+// backend-node/db_operations.js
+// ...
+
+async function calcularCosteMaterialEspecifico(material_tipo, espesor, ancho_producto_m, largo_producto_m, appConfig) {
     try {
         const queryMateriaPrima = `
-            SELECT coste_unitario_final, unidad_medida
+            SELECT coste_unitario_final, unidad_medida, ancho AS ancho_bobina_mm 
             FROM StockMateriasPrimas
             WHERE material_tipo = ? AND espesor = ?
             ORDER BY fecha_entrada_almacen DESC, id DESC
             LIMIT 1
         `;
-        // Usar el helper getDB que maneja la conexión y el cierre
         const materiaPrima = await getDB(queryMateriaPrima, [material_tipo, espesor]);
 
-        let costeBaseUnitarioMaterial = 0;
-        let unidadMedidaMaterial = 'm'; // Asumir metros por defecto para bobinas
-
-        if (materiaPrima) {
-            costeBaseUnitarioMaterial = parseFloat(materiaPrima.coste_unitario_final) || 0;
-            unidadMedidaMaterial = materiaPrima.unidad_medida || 'm';
-        } else {
-            // Lógica de fallback si no se encuentra la materia prima (puedes ajustarla)
-            console.warn(`No se encontró materia prima en stock para ${material_tipo} con espesor ${espesor}. Usando coste por defecto simulado.`);
-            if (material_tipo === 'Goma') {
-                if (espesor === '6mm') costeBaseUnitarioMaterial = 5.0;
-                else if (espesor === '8mm') costeBaseUnitarioMaterial = 6.5;
-                else if (espesor === '10mm') costeBaseUnitarioMaterial = 8.0;
-                else if (espesor === '12mm') costeBaseUnitarioMaterial = 9.5;
-                else if (espesor === '15mm') costeBaseUnitarioMaterial = 11.0;
-            } else if (material_tipo === 'PVC') {
-                if (espesor === '2mm') costeBaseUnitarioMaterial = 3.0;
-                else if (espesor === '3mm') costeBaseUnitarioMaterial = 4.0;
-            } else if (material_tipo === 'Fieltro') {
-                if (espesor === 'F10') costeBaseUnitarioMaterial = 2.5;
-                else if (espesor === 'F15') costeBaseUnitarioMaterial = 3.5;
-            }
-        }
-
         let costeTotalMaterial = 0;
-        if (unidadMedidaMaterial.toLowerCase() === 'm' || unidadMedidaMaterial.toLowerCase() === 'm2') { // Asumir m2 o m lineal donde el ancho es relevante
-            // Si el coste es por m2, y el producto usa largo * ancho de ese material:
-            // costeTotalMaterial = costeBaseUnitarioMaterial * ancho * largo;
-            // Si el coste es por m lineal de un ancho estándar y el producto requiere un ancho diferente, se complica.
-            // Por ahora, si es 'm', asumimos que es coste por m lineal de ese ancho específico si 'ancho' es el del producto.
-            // Si costeBaseUnitarioMaterial es por metro lineal de un ancho de bobina X, y el producto es de ancho Y, largo Z:
-            // (costeBaseUnitarioMaterial / X_bobina) * Y_producto * Z_producto
-            // Para simplificar, si la unidad es 'm', asumimos que el coste unitario es por m de la pieza de ancho 'ancho'
-            costeTotalMaterial = costeBaseUnitarioMaterial * largo; // Simplificación: coste por metro lineal de la pieza
-                                                                // Si ancho se refiere al ancho de la materia prima original y coste es por m2:
-                                                                // costeTotalMaterial = costeBaseUnitarioMaterial * ancho_MP_para_pieza * largo;
-                                                                // Es importante definir bien qué significa coste_unitario_final
-        } else if (unidadMedidaMaterial.toLowerCase() === 'ud') {
-            costeTotalMaterial = costeBaseUnitarioMaterial; // Asumimos que la cantidad es 1 ud. para el cálculo temporal
+
+        if (materiaPrima && materiaPrima.coste_unitario_final !== null && materiaPrima.ancho_bobina_mm !== null) {
+            const costeUnitarioLinealBobina = parseFloat(materiaPrima.coste_unitario_final);
+            const anchoBobinaMM = parseFloat(materiaPrima.ancho_bobina_mm);
+
+            if (anchoBobinaMM > 0) {
+                const anchoBobinaM = anchoBobinaMM / 1000.0;
+                const costePorM2MateriaPrima = costeUnitarioLinealBobina / anchoBobinaM;
+                const areaProductoM2 = ancho_producto_m * largo_producto_m;
+                costeTotalMaterial = costePorM2MateriaPrima * areaProductoM2;
+            } else {
+                console.warn(`Ancho de bobina es 0 o nulo para ${material_tipo} con espesor ${espesor}. No se puede calcular coste por m2.`);
+                // Aquí podrías decidir usar un coste por defecto o lanzar un error
+            }
+        } else {
+            console.warn(`No se encontró materia prima en stock o datos incompletos para ${material_tipo} con espesor ${espesor} para calcular coste por m2. Se intentará coste de fallback si existe.`);
+            // Aquí puedes re-implementar tu lógica de fallback de costes si es necesario,
+            // pero idealmente deberías tener datos de coste fiables.
+            // Por ahora, si no hay materia prima, el coste de material será 0.
         }
-        // Añadir más lógica para otras unidades si es necesario
 
         let costeManoObra = 0;
-        if (appConfig && appConfig.coste_mano_obra_por_metro_metraje) { // Verificar que appConfig y la propiedad existan
-             costeManoObra = (parseFloat(appConfig.coste_mano_obra_por_metro_metraje) || 0) * largo;
+        if (appConfig && appConfig.coste_mano_obra_por_metro_metraje) {
+             costeManoObra = (parseFloat(appConfig.coste_mano_obra_por_metro_metraje) || 0) * largo_producto_m;
         }
 
         const costeFinalCalculado = costeTotalMaterial + costeManoObra;
-        return costeFinalCalculado;
+        return parseFloat(costeFinalCalculado.toFixed(4)); // Devolver con 4 decimales
 
     } catch (error) {
         console.error("Error en calcularCosteMaterialEspecifico:", error.message, error.stack);
-        throw error; // Relanzar para que el endpoint lo capture
+        throw error;
     }
 }
 
@@ -1314,16 +1343,14 @@ async function eliminarStockProductoTerminado(id) {
 
 // --- LÓGICA DE CÁLCULO DE COSTES DE FABRICACIÓN ---
 
-/**
- * Obtiene el último coste unitario de un material genérico (materia prima o componente).
- * @param {sqlite3.Database} dbInstance - Instancia de la base de datos.
- * @param {object} materialGenerico - Objeto con las características genéricas del material.
- * @returns {Promise<number>} El último coste unitario conocido.
- */
+// backend-node/db_operations.js
+
+// ... (insertarProductoTerminado y actualizarReferenciaProductoTerminado ya deberían aceptar dbInstance)
+
 async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) {
     if (materialGenerico.material_tipo_generico) {
         const sql = `
-            SELECT coste_unitario_final
+            SELECT coste_unitario_final, ancho AS ancho_bobina_mm
             FROM StockMateriasPrimas
             WHERE material_tipo = ?
               AND (subtipo_material = ? OR (subtipo_material IS NULL AND ? IS NULL))
@@ -1337,23 +1364,129 @@ async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) 
             materialGenerico.material_tipo_generico,
             materialGenerico.subtipo_material_generico, materialGenerico.subtipo_material_generico,
             materialGenerico.espesor_generico, materialGenerico.espesor_generico,
-            materialGenerico.ancho_generico, materialGenerico.ancho_generico,
+            materialGenerico.ancho_generico, materialGenerico.ancho_generico, // Este es el ancho_generico de la receta
             materialGenerico.color_generico, materialGenerico.color_generico
         ];
-        const row = await getAsync(dbInstance, sql, params);
-        return row ? parseFloat(row.coste_unitario_final) : 0;
+        // Asegúrate de que `ancho` en StockMateriasPrimas es el que necesitas aquí para el cálculo de m2.
+        // Si el `ancho_generico` de la receta es el relevante para el cálculo de coste, la query es más compleja
+        // o el `ancho_generico` debe coincidir con el `ancho` de la bobina.
+        // Por ahora, asumimos que la query busca una bobina compatible en general.
+        const row = await getAsync(dbInstance, sql, params); // Usa getAsync
+        return row; // Devolver la fila completa para tener coste y ancho_bobina_mm
     } else if (materialGenerico.componente_ref_generico) {
         const sql = `
-            SELECT coste_unitario_final
+            SELECT coste_unitario_final, null AS ancho_bobina_mm /* Componentes no tienen ancho de bobina */
             FROM StockComponentes
             WHERE componente_ref = ?
             ORDER BY fecha_entrada_almacen DESC, id DESC
             LIMIT 1
         `;
-        const row = await getAsync(dbInstance, sql, [materialGenerico.componente_ref_generico]);
-        return row ? parseFloat(row.coste_unitario_final) : 0;
+        const row = await getAsync(dbInstance, sql, [materialGenerico.componente_ref_generico]); // Usa getAsync
+        return row;
     }
-    return 0;
+    return null;
+}
+
+async function calcularCosteMateriales(dbInstance, productoTerminadoId, configuraciones, productoAnchoFinalM, productoLargoFinalM) {
+    const recetas = await allAsync(dbInstance, `
+        SELECT r.cantidad_requerida, r.unidades_por_ancho_material,
+               r.material_tipo_generico, r.subtipo_material_generico, r.espesor_generico, 
+               r.ancho_generico AS ancho_generico_receta, r.color_generico, /* ancho_generico_receta puede ser para verificar compatibilidad */
+               r.componente_ref_generico
+        FROM Recetas r
+        WHERE r.producto_terminado_id = ?
+    `, [productoTerminadoId]);
+
+    let costeTotalMateriales = 0;
+    for (const receta of recetas) {
+        const cantidadRequerida = parseFloat(receta.cantidad_requerida) || 0;
+        const materiaPrimaInfo = await obtenerUltimoCosteMaterialGenerico(dbInstance, receta); // Pasa dbInstance
+
+        if (materiaPrimaInfo && materiaPrimaInfo.coste_unitario_final !== null) {
+            let costeMaterialParaEstaReceta = 0;
+            const costeUnitarioBobina = parseFloat(materiaPrimaInfo.coste_unitario_final);
+
+            if (receta.material_tipo_generico) { // Es materia prima (bobina)
+                const anchoBobinaMM = parseFloat(materiaPrimaInfo.ancho_bobina_mm);
+                if (anchoBobinaMM > 0) {
+                    const anchoBobinaM = anchoBobinaMM / 1000.0;
+                    const costePorM2MateriaPrima = costeUnitarioBobina / anchoBobinaM;
+                    // Usamos ancho_final y largo_final del producto que se pasó a actualizarCosteFabricacionEstandar
+                    const areaProductoM2 = productoAnchoFinalM * productoLargoFinalM;
+                    costeMaterialParaEstaReceta = costePorM2MateriaPrima * areaProductoM2 * cantidadRequerida; // Si cantidad_requerida es "cuántas veces esta pieza"
+                                                                                                    // o si cantidad_requerida ya es el área/longitud, ajustar
+                } else {
+                     console.warn(`Ancho de bobina 0 o nulo para receta de PT ID ${productoTerminadoId}`);
+                }
+            } else if (receta.componente_ref_generico) { // Es componente
+                costeMaterialParaEstaReceta = costeUnitarioBobina * cantidadRequerida;
+            }
+            costeTotalMateriales += costeMaterialParaEstaReceta;
+        } else {
+            console.warn(`No se encontró coste para material genérico de receta para PT ID ${productoTerminadoId}. Material: ${receta.material_tipo_generico || receta.componente_ref_generico}`);
+        }
+    }
+    return costeTotalMateriales;
+}
+
+async function calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones) {
+    const procesos = await allAsync(dbInstance, `
+        SELECT pf.tiempo_estimado_horas, m.coste_hora_operacion
+        FROM ProcesosFabricacion pf
+        JOIN Maquinaria m ON pf.maquinaria_id = m.id
+        WHERE pf.producto_terminado_id = ?
+    `, [productoTerminadoId]); // Usa allAsync
+
+    const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0);
+    let costeTotalProcesos = 0;
+    for (const proceso of procesos) {
+        const tiempoHoras = parseFloat(proceso.tiempo_estimado_horas) || 0;
+        const costeMaquinaOperacion = parseFloat(proceso.coste_hora_operacion) || 0;
+        costeTotalProcesos += tiempoHoras * (costeManoObraDefault + costeMaquinaOperacion);
+    }
+    return costeTotalProcesos;
+}
+
+// Ajustar actualizarCosteFabricacionEstandar para obtener ancho_final y largo_final del producto
+async function actualizarCosteFabricacionEstandar(dbInstance, productoTerminadoId, configuraciones) {
+    try {
+        const producto = await getAsync(dbInstance, 
+            `SELECT coste_extra_unitario, ancho_final, largo_final 
+             FROM ProductosTerminados WHERE id = ?`, 
+            [productoTerminadoId]
+        );
+        if (!producto) {
+            throw new Error(`Producto terminado con ID ${productoTerminadoId} no encontrado para calcular coste estándar.`);
+        }
+        const costeExtra = parseFloat(producto.coste_extra_unitario) || 0;
+        const productoAnchoFinalM = parseFloat(producto.ancho_final) || 0;
+        const productoLargoFinalM = parseFloat(producto.largo_final) || 0;
+
+        // Asegurarse de que ancho y largo sean válidos para el cálculo de materiales
+        if (productoAnchoFinalM <= 0 || productoLargoFinalM <= 0) {
+            console.warn(`Producto ID ${productoTerminadoId} tiene dimensiones no válidas (ancho: ${productoAnchoFinalM}, largo: ${productoLargoFinalM}) para cálculo de coste de material. El coste de material será 0.`);
+             // No se puede calcular el coste de materiales si las dimensiones no son válidas
+            const costeMateriales = 0; // O manejar como error
+            const costeProcesos = await calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones);
+            const costeTotal = costeMateriales + costeProcesos + costeExtra;
+            await runAsync(dbInstance, `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, [costeTotal.toFixed(4), productoTerminadoId]);
+            console.log(`Coste de fabricación estándar (con material=0 por dimensiones no válidas) para producto ${productoTerminadoId} actualizado a ${costeTotal.toFixed(4)}`);
+            return parseFloat(costeTotal.toFixed(4));
+
+        }
+
+
+        const costeMateriales = await calcularCosteMateriales(dbInstance, productoTerminadoId, configuraciones, productoAnchoFinalM, productoLargoFinalM);
+        const costeProcesos = await calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones);
+        const costeTotal = costeMateriales + costeProcesos + costeExtra;
+
+        await runAsync(dbInstance, `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, [costeTotal.toFixed(4), productoTerminadoId]);
+        console.log(`Coste de fabricación estándar para producto ${productoTerminadoId} actualizado a ${costeTotal.toFixed(4)}`);
+        return parseFloat(costeTotal.toFixed(4));
+    } catch (error) {
+        console.error(`Error al actualizar coste de fabricación estándar para producto ${productoTerminadoId}:`, error.message, error.stack);
+        throw error;
+    }
 }
 
 /**
@@ -1393,64 +1526,13 @@ async function calcularCosteMateriales(dbInstance, productoTerminadoId) {
     return costeTotalMateriales;
 }
 
-/**
- * Calcula el coste de los procesos de fabricación para un producto terminado.
- * Para el coste estándar, suma todos los procesos.
- * @param {sqlite3.Database} dbInstance - Instancia de la base de datos.
- * @param {number} productoTerminadoId - ID del producto terminado.
- * @param {object} configuraciones - Objeto con las configuraciones cargadas (ej. coste_mano_obra_default).
- * @returns {Promise<number>} Coste total de procesos (maquinaria + mano de obra).
- */
-async function calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones) {
-    const procesos = await allAsync(dbInstance, `
-        SELECT pf.tiempo_estimado_horas,
-               m.coste_hora_operacion
-        FROM ProcesosFabricacion pf
-        JOIN Maquinaria m ON pf.maquinaria_id = m.id
-        WHERE pf.producto_terminado_id = ?
-    `, [productoTerminadoId]);
 
-    const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0);
 
-    let costeTotalProcesos = 0;
-    for (const proceso of procesos) {
-        const tiempoHoras = parseFloat(proceso.tiempo_estimado_horas) || 0;
-        const costeMaquinaOperacion = parseFloat(proceso.coste_hora_operacion) || 0;
-        
-        costeTotalProcesos += tiempoHoras * (costeManoObraDefault + costeMaquinaOperacion);
-    }
-    return costeTotalProcesos;
-}
-
-/**
- * Calcula y actualiza el coste de fabricación estándar de un producto terminado.
- * @param {number} productoTerminadoId - ID del producto terminado.
- * @param {object} configuraciones - Objeto con las configuraciones cargadas (ej. coste_mano_obra_default).
- * @returns {Promise<number>} El coste de fabricación estándar calculado.
- */
-async function actualizarCosteFabricacionEstandar(productoTerminadoId, configuraciones) {
-    const db = conectarDB(); // Conexión para la transacción
-    try {
-        const producto = await getAsync(db, `SELECT coste_extra_unitario FROM ProductosTerminados WHERE id = ?`, [productoTerminadoId]);
-        if (!producto) {
-            throw new Error(`Producto terminado con ID ${productoTerminadoId} no encontrado para calcular coste estándar.`);
-        }
-        const costeExtra = parseFloat(producto.coste_extra_unitario) || 0;
-
-        const costeMateriales = await calcularCosteMateriales(db, productoTerminadoId);
-        const costeProcesos = await calcularCosteProcesos(db, productoTerminadoId, configuraciones);
-        const costeTotal = costeMateriales + costeProcesos + costeExtra;
-
-        await runAsync(db, `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, [costeTotal, productoTerminadoId]);
-        console.log(`Coste de fabricación estándar para producto ${productoTerminadoId} actualizado a ${costeTotal}`);
-        return costeTotal;
-    } catch (error) {
-        console.error(`Error al actualizar coste de fabricación estándar para producto ${productoTerminadoId}:`, error.message);
-        throw error;
-    } finally {
-        db.close(); // Cerrar la conexión al finalizar la transacción
-    }
-}
+// También `calcularCosteMateriales` y `calcularCosteProcesos` deben aceptar `dbInstance`
+async function calcularCosteMateriales(dbInstance, productoTerminadoId, configuraciones) { /* ...usar getAsync(dbInstance, ...) y allAsync(dbInstance, ...) ... */ }
+async function calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones) { /* ...usar allAsync(dbInstance, ...) ... */ }
+// Y `obtenerUltimoCosteMaterialGenerico` también
+async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) { /* ...usar getAsync(dbInstance, ...) ... */ }
 
 // --- LÓGICA DE PROCESAMIENTO DE ÓRDENES DE PRODUCCIÓN ---
 
@@ -2007,5 +2089,14 @@ module.exports = {
     calcularCosteMaterialEspecifico, // Asegúrate de exportar esta nueva función de cálculo
 
     obtenerConfiguracion,
-    actualizarConfiguracion
+    actualizarConfiguracion,
+    actualizarReferenciaProductoTerminado,
+
+    calcularCosteProcesos,
+    obtenerUltimoCosteMaterialGenerico,
+
+    conectarDB,
+    runAsync,
+    getAsync,
+    allAsync
 };

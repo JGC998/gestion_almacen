@@ -16,6 +16,7 @@ const {
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
 
+    actualizarReferenciaProductoTerminado,
     insertarProductoTerminado,
     consultarProductosTerminados,
     consultarProductoTerminadoPorId,
@@ -61,7 +62,10 @@ const {
     calcularCosteMaterialEspecifico, // Asegúrate de exportar esta nueva función de cálculo
 
     obtenerConfiguracion,
-    actualizarConfiguracion
+    actualizarConfiguracion,
+
+    conectarDB,
+    runAsync
 } = require('./db_operations.js');
 
 
@@ -218,16 +222,17 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla StockComponentes verificada/creada.");
         });
 
-        // --- NUEVAS TABLAS PARA LA FASE 5 (Revisado con nuevos campos en Recetas) ---
-       db.run(`CREATE TABLE IF NOT EXISTS ProductosTerminados (
+        db.run(`CREATE TABLE IF NOT EXISTS ProductosTerminados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            referencia TEXT NOT NULL UNIQUE,
+            referencia TEXT UNIQUE, /* CAMBIADO: Eliminado NOT NULL. Se generará y actualizará después. */
             nombre TEXT NOT NULL,
-            descripcion TEXT,
+            /* descripcion TEXT, -- YA ELIMINADO EN TU CÓDIGO */
             unidad_medida TEXT NOT NULL DEFAULT 'unidad',
             coste_fabricacion_estandar REAL,
-            margen_venta_default REAL,
-            precio_venta_sugerido REAL,
+            material_principal TEXT,
+            espesor_principal TEXT,
+            ancho_final REAL,
+            largo_final REAL,
             coste_extra_unitario REAL,
             fecha_creacion TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK(status IN ('ACTIVO', 'DESCATALOGADO', 'OBSOLETO'))
@@ -236,7 +241,7 @@ function crearTablasSiNoExisten() {
                 console.error("Error creando tabla ProductosTerminados:", err.message);
             } else {
                 console.log("Tabla ProductosTerminados verificada/creada.");
-                // La lógica para ALTER TABLE va aquí, DENTRO del callback de creación de ProductosTerminados
+                // El resto de tu lógica para ALTER TABLE (para material_principal, etc.) se mantiene.
                 db.all(`PRAGMA table_info(ProductosTerminados);`, [], (pragmaErr, rows) => {
                     if (pragmaErr) {
                         console.error("Error al obtener información de tabla ProductosTerminados:", pragmaErr.message);
@@ -244,38 +249,33 @@ function crearTablasSiNoExisten() {
                     }
                     if (rows && rows.length > 0) {
                         const columnNames = rows.map(col => col.name);
-                        if (!columnNames.includes('material_principal')) {
-                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN material_principal TEXT`, (alterErr) => {
-                                if (alterErr) console.error("Error añadiendo columna material_principal:", alterErr.message);
-                                else console.log("Columna material_principal añadida a ProductosTerminados.");
-                            });
-                        }
-                        if (!columnNames.includes('espesor_principal')) {
-                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN espesor_principal TEXT`, (alterErr) => {
-                                if (alterErr) console.error("Error añadiendo columna espesor_principal:", alterErr.message);
-                                else console.log("Columna espesor_principal añadida a ProductosTerminados.");
-                            });
-                        }
-                        if (!columnNames.includes('ancho_final')) {
-                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN ancho_final REAL`, (alterErr) => {
-                                if (alterErr) console.error("Error añadiendo columna ancho_final:", alterErr.message);
-                                else console.log("Columna ancho_final añadida a ProductosTerminados.");
-                            });
-                        }
-                        if (!columnNames.includes('largo_final')) {
-                            db.run(`ALTER TABLE ProductosTerminados ADD COLUMN largo_final REAL`, (alterErr) => {
-                                if (alterErr) console.error("Error añadiendo columna largo_final:", alterErr.message);
-                                else console.log("Columna largo_final añadida a ProductosTerminados.");
-                            });
-                        }
-                    } else if (rows) {
-                        console.log("PRAGMA table_info(ProductosTerminados) no devolvió información de columnas o la tabla está vacía.");
+                        const columnsToAdd = [ // Definir columnas a añadir si no existen
+                            { name: 'material_principal', type: 'TEXT' },
+                            { name: 'espesor_principal', type: 'TEXT' },
+                            { name: 'ancho_final', type: 'REAL' },
+                            { name: 'largo_final', type: 'REAL' },
+                            { name: 'coste_extra_unitario', type: 'REAL' }
+                        ];
+                        columnsToAdd.forEach(colDef => {
+                            if (!columnNames.includes(colDef.name)) {
+                                db.run(`ALTER TABLE ProductosTerminados ADD COLUMN ${colDef.name} ${colDef.type}`, (alterErr) => {
+                                    if (alterErr) console.error(`Error añadiendo columna ${colDef.name}:`, alterErr.message);
+                                    else console.log(`Columna ${colDef.name} añadida a ProductosTerminados.`);
+                                });
+                            }
+                        });
+                        // Si la columna 'descripcion' todavía existe y quieres asegurarte de que se elimine:
+                        // if (columnNames.includes('descripcion')) {
+                        //     db.run(`ALTER TABLE ProductosTerminados DROP COLUMN descripcion;`, (dropErr) => {
+                        //         if (dropErr) console.error("Error eliminando columna descripcion (si existía):", dropErr.message);
+                        //         else console.log("Columna descripcion eliminada de ProductosTerminados (si existía).");
+                        //     });
+                        // }
                     }
                 });
             }
-        }); 
+        });
 
-        
 
         db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -292,41 +292,35 @@ function crearTablasSiNoExisten() {
         db.run(`CREATE TABLE IF NOT EXISTS Recetas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             producto_terminado_id INTEGER NOT NULL,
-            
-            -- Material genérico (bobinas)
             material_tipo_generico TEXT CHECK(material_tipo_generico IN ('GOMA', 'PVC', 'FIELTRO')),
             subtipo_material_generico TEXT,
             espesor_generico TEXT,
             ancho_generico REAL,
             color_generico TEXT,
-
-            -- Componente genérico
             componente_ref_generico TEXT,
-
             cantidad_requerida REAL NOT NULL,
             unidad_medida_requerida TEXT NOT NULL,
-            unidades_por_ancho_material REAL, -- Cuántas unidades de PT caben en el ancho de la MP
-            peso_por_unidad_producto REAL, -- Peso estimado de una unidad de producto terminado
+            unidades_por_ancho_material REAL,
+            peso_por_unidad_producto REAL,
             notas TEXT,
-            
             FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
             CHECK (
                 (material_tipo_generico IS NOT NULL AND componente_ref_generico IS NULL) OR
                 (material_tipo_generico IS NULL AND componente_ref_generico IS NOT NULL)
-            ) -- Asegura que solo uno de los tipos genéricos esté presente
+            )
         )`, (err) => {
             if (err) console.error("Error creando tabla Recetas:", err.message);
             else console.log("Tabla Recetas verificada/creada.");
         });
 
-        // MODIFICADA: Tabla ProcesosFabricacion (añadido campo aplica_a_clientes)
+        // --- MODIFICACIÓN AQUÍ para ON DELETE CASCADE ---
         db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             producto_terminado_id INTEGER NOT NULL,
             maquinaria_id INTEGER NOT NULL,
             nombre_proceso TEXT NOT NULL,
             tiempo_estimado_horas REAL NOT NULL,
-            aplica_a_clientes TEXT, -- NUEVO CAMPO: 'FABRICANTE', 'FINAL,FABRICANTE', 'ALL', etc.
+            aplica_a_clientes TEXT,
             FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
             FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id) ON DELETE RESTRICT
         )`, (err) => {
@@ -334,6 +328,7 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla ProcesosFabricacion verificada/creada.");
         });
 
+        // --- MODIFICACIÓN AQUÍ para ON DELETE CASCADE ---
         db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             producto_terminado_id INTEGER NOT NULL,
@@ -342,12 +337,13 @@ function crearTablasSiNoExisten() {
             status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK(status IN ('PENDIENTE', 'EN_PROCESO', 'COMPLETADA', 'CANCELADA')),
             coste_real_fabricacion REAL,
             observaciones TEXT,
-            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE RESTRICT
+            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE
         )`, (err) => {
             if (err) console.error("Error creando tabla OrdenesProduccion:", err.message);
             else console.log("Tabla OrdenesProduccion verificada/creada.");
         });
 
+        // --- MODIFICACIÓN AQUÍ para ON DELETE CASCADE ---
         db.run(`CREATE TABLE IF NOT EXISTS StockProductosTerminados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             producto_id INTEGER NOT NULL,
@@ -359,7 +355,7 @@ function crearTablasSiNoExisten() {
             status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'RESERVADO', 'AGOTADO', 'DAÑADO')),
             ubicacion TEXT,
             notas TEXT,
-            FOREIGN KEY(producto_id) REFERENCES ProductosTerminados(id) ON DELETE RESTRICT,
+            FOREIGN KEY(producto_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
             FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
         )`, (err) => {
             if (err) console.error("Error creando tabla StockProductosTerminados:", err.message);
@@ -730,31 +726,85 @@ app.get('/api/tarifa-venta', async (req, res) => {
 
 // --- ENDPOINTS PARA LA FASE 5 (ACTUALIZADOS) ---
 
-// --- ProductosTerminados ---
 app.post('/api/productos-terminados', async (req, res) => {
     const productoData = req.body;
-    console.log('Node.js: POST /api/productos-terminados', productoData);
-    // Ahora los campos material_principal, espesor_principal, ancho_final, largo_final vienen del frontend
-    if (!productoData.referencia || !productoData.nombre || !productoData.material_principal || !productoData.espesor_principal || !productoData.ancho_final || !productoData.largo_final) {
-        return res.status(400).json({ error: "Referencia, nombre, material, espesor, ancho y largo del producto son requeridos." });
-    }
-    if (!productoData.unidad_medida) {
-        productoData.unidad_medida = 'unidad';
+    console.log('Node.js: POST /api/productos-terminados, datos recibidos:', productoData);
+
+    if (!productoData.nombre || !productoData.material_principal || !productoData.espesor_principal ||
+        productoData.ancho_final === undefined || productoData.largo_final === undefined) {
+        return res.status(400).json({ error: "Nombre, material principal, espesor principal, ancho final y largo final de la plantilla son requeridos." });
     }
 
+    // Validar que ancho_final y largo_final sean números
+    const anchoFinalNum = parseFloat(productoData.ancho_final);
+    const largoFinalNum = parseFloat(productoData.largo_final);
+
+    if (isNaN(anchoFinalNum) || anchoFinalNum <= 0) {
+        return res.status(400).json({ error: "El 'ancho_final' debe ser un número positivo." });
+    }
+    if (isNaN(largoFinalNum) || largoFinalNum <= 0) {
+        return res.status(400).json({ error: "El 'largo_final' debe ser un número positivo." });
+    }
+    // Sobrescribir con los números parseados para asegurar consistencia
+    productoData.ancho_final = anchoFinalNum;
+    productoData.largo_final = largoFinalNum;
+
+
+    const db = conectarDB(); // Obtener una instancia de DB para la transacción. Es crucial que sea la misma instancia para todas las operaciones de la transacción.
+
     try {
-        const id = await insertarProductoTerminado(productoData);
-        // Recalcular el coste estándar después de la inserción, ya que depende de la receta
-        await actualizarCosteFabricacionEstandar(id, appConfig); 
-        res.status(201).json({ mensaje: "Producto terminado creado con éxito.", id });
+        await runAsync(db, 'BEGIN TRANSACTION;'); // Iniciar transacción
+
+        // 1. Insertar el producto (que ahora inserta NULL para referencia)
+        // La función insertarProductoTerminado debe estar adaptada para usar dbInstance (db en este caso) y runAsync.
+        const productoId = await insertarProductoTerminado(db, productoData);
+
+        // 2. Generar y actualizar la referencia
+        const referenciaGenerada = `PT-${productoId.toString().padStart(5, '0')}`;
+        // La función actualizarReferenciaProductoTerminado también debe usar dbInstance y runAsync.
+        await actualizarReferenciaProductoTerminado(db, productoId, referenciaGenerada);
+
+        // 3. Recalcular/actualizar el coste estándar.
+        // Esta función y las que llama (calcularCosteMateriales, calcularCosteProcesos, obtenerUltimoCosteMaterialGenerico)
+        // deben estar adaptadas para usar dbInstance y los helpers ...Async.
+        // El 'coste_fabricacion_estandar' enviado desde el frontend (productoData.coste_fabricacion_estandar)
+        // es el coste de material estimado, que se guarda inicialmente por insertarProductoTerminado.
+        // Esta llamada lo recalculará (o lo confirmará si la lógica de cálculo da el mismo resultado).
+        await actualizarCosteFabricacionEstandar(db, productoId, appConfig);
+
+        await runAsync(db, 'COMMIT;'); // Confirmar transacción
+
+        console.log(`Plantilla de producto ID ${productoId} creada con referencia ${referenciaGenerada}.`);
+        res.status(201).json({ mensaje: "Plantilla de producto creada con éxito.", id: productoId, referencia: referenciaGenerada });
+
     } catch (error) {
-        console.error("Error en POST /api/productos-terminados:", error.message);
-        if (error.message.includes("ya existe")) {
-            return res.status(409).json({ error: error.message });
+        console.error("Error en POST /api/productos-terminados (transacción):", error.message, error.stack);
+        if (db) { // Solo intentar ROLLBACK si db está definida
+            try {
+                await runAsync(db, 'ROLLBACK;');
+                console.log("Transacción revertida (ROLLBACK) en POST /api/productos-terminados.");
+            } catch (rollbackError) {
+                console.error("Error crítico durante ROLLBACK en POST /api/productos-terminados:", rollbackError.message, rollbackError.stack);
+            }
         }
-        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+        // Manejo de errores específicos
+        if (error.message && error.message.toUpperCase().includes("UNIQUE CONSTRAINT FAILED")) {
+            if (error.message.includes("ProductosTerminados.referencia")) {
+                 return res.status(409).json({ error: "Conflicto al generar referencia única. Intente de nuevo.", detalle: error.message });
+            } else if (error.message.includes("ProductosTerminados.nombre")) { // Si haces el nombre único
+                 return res.status(409).json({ error: "El nombre de la plantilla de producto ya existe.", detalle: error.message });
+            }
+        }
+        res.status(500).json({ error: "Error interno del servidor al crear la plantilla de producto.", detalle: error.message });
+    } finally {
+        if (db) { // Solo cerrar si db está definida
+            db.close((err) => {
+                if (err) console.error("Error cerrando la BD en POST /api/productos-terminados:", err.message);
+            });
+        }
     }
 });
+// ...
 
 // GET para obtener todos los productos terminados
 app.get('/api/productos-terminados', async (req, res) => {
@@ -1234,24 +1284,36 @@ app.get('/api/materiales-genericos', async (req, res) => {
     }
 });
 
-// --- NUEVO ENDPOINT para calcular el coste de un producto temporal (para el formulario de creación) ---
+// backend-node/server.js
+// ...
 app.post('/api/calcular-coste-producto-temporal', async (req, res) => {
-    const { material_tipo, espesor, ancho, largo } = req.body;
-    console.log(`Node.js: Solicitud de cálculo de coste temporal para Material: ${material_tipo}, Espesor: ${espesor}, Ancho: ${ancho}, Largo: ${largo}`);
+    // Esperar los nombres descriptivos del frontend
+    const { material_tipo, espesor, ancho_producto_m, largo_producto_m } = req.body; 
+    console.log(`Node.js: Solicitud de cálculo de coste temporal para Material: ${material_tipo}, Espesor: ${espesor}, Ancho Prod: ${ancho_producto_m}, Largo Prod: ${largo_producto_m}`);
 
-    if (!material_tipo || !espesor || isNaN(ancho) || ancho <= 0 || isNaN(largo) || largo <= 0) {
-        return res.status(400).json({ error: "Datos incompletos o inválidos para el cálculo de coste temporal. Se requieren material_tipo, espesor, ancho y largo válidos." });
+    // Validar con los nuevos nombres
+    if (!material_tipo || !espesor || 
+        ancho_producto_m === undefined || isNaN(parseFloat(ancho_producto_m)) || parseFloat(ancho_producto_m) <= 0 ||
+        largo_producto_m === undefined || isNaN(parseFloat(largo_producto_m)) || parseFloat(largo_producto_m) <= 0) {
+        return res.status(400).json({ error: "Datos incompletos o inválidos para el cálculo de coste temporal. Se requieren material_tipo, espesor, ancho_producto_m y largo_producto_m válidos." });
     }
 
     try {
-        // Llama a la función de db_operations para calcular el coste
-        const costeCalculado = await calcularCosteMaterialEspecifico(material_tipo, espesor, parseFloat(ancho), parseFloat(largo), appConfig);
+        // Pasar los valores parseados a la función de cálculo
+        const costeCalculado = await calcularCosteMaterialEspecifico(
+            material_tipo, 
+            espesor, 
+            parseFloat(ancho_producto_m), 
+            parseFloat(largo_producto_m), 
+            appConfig
+        );
         res.json({ costeCalculado: costeCalculado });
     } catch (error) {
-        console.error("Error en POST /api/calcular-coste-producto-temporal:", error.message);
+        console.error("Error en POST /api/calcular-coste-producto-temporal:", error.message, error.stack);
         res.status(500).json({ error: "Error interno del servidor al calcular el coste temporal.", detalle: error.message });
     }
 });
+// ...
 
 
 // --- NUEVO ENDPOINT para calcular presupuesto de producto terminado (la funcionalidad central) ---
