@@ -5,247 +5,224 @@ Fase 0: Base Establecida y Configuración Inicial (COMPLETADA)
 
     [X] Creación de la estructura del proyecto:
 
-        Repositorio Git (gestion_almacen) inicializado en GitHub con README y .gitignore para Node.
+        [X] Repositorio Git (gestion_almacen) inicializado en GitHub con README y .gitignore para Node.
 
-        Carpeta raíz local clonada.
+        [X] Carpeta raíz local clonada.
 
-        Subcarpeta backend-node creada e inicializada (npm init -y).
+        [X] Subcarpeta backend-node creada e inicializada (npm init -y).
 
-        Subcarpeta frontend-react creada.
+        [X] Subcarpeta frontend-react creada.
 
     [X] Configuración del Backend Node.js Inicial:
 
-        Dependencias instaladas: express, cors, sqlite3, nodemon.
+        [X] Dependencias instaladas: express, cors, sqlite3, nodemon.
 
-        Carpeta backend-node/almacen/ creada y archivo almacen.db copiado.
+        [X] Carpeta backend-node/almacen/ creada y archivo almacen.db gestionado.
 
-        Archivo backend-node/server.js creado con:
+        [X] Archivo backend-node/server.js creado con:
 
-            Configuración de servidor Express.
+            [X] Configuración de servidor Express.
 
-            Conexión a almacen.db.
+            [X] Conexión a almacen.db.
 
-            Función crearTablasSiNoExisten() implementada para todas las tablas esenciales (PedidosProveedores, LineasPedido, GastosPedido, StockMateriasPrimas, StockComponentes, Configuracion). (Nota: Estructura de StockMateriasPrimas modificada para bobinas individuales).
+            [X] Función crearTablasSiNoExisten() implementada para todas las tablas esenciales (PedidosProveedores, LineasPedido, GastosPedido, StockMateriasPrimas, StockComponentes, ProductosTerminados, Maquinaria, Recetas, ProcesosFabricacion, OrdenesProduccion, StockProductosTerminados, Configuracion).
 
-            Actualización: Incluye la creación de las nuevas tablas de la Fase 5 (ProductosTerminados, Maquinaria, Recetas, ProcesosFabricacion, OrdenesProduccion, StockProductosTerminados).
+            [X] Endpoint de prueba GET /api/estado funcional.
 
-            Endpoint de prueba GET /api/estado funcional.
-
-            Escuchando en el puerto 5002.
-
-        Verificación exitosa del inicio del servidor, conexión a DB y creación/verificación de tablas.
+        [X] Verificación exitosa del inicio del servidor, conexión a DB y creación/verificación de tablas.
 
     [X] Creación del archivo backend-node/db_operations.js:
 
-        Función conectarDB() definida.
+        [X] Función conectarDB() y helpers para operaciones DB (runDB, allDB, getDB, runAsync, allAsync, getAsync).
 
-        Función consultarStockMateriasPrimas() implementada (devuelve Promesa con datos de StockMateriasPrimas - ahora bobinas individuales).
-
-        Actualización: Incluye funciones CRUD completas para todas las tablas de la Fase 5.
+        [X] Funciones CRUD básicas para las entidades principales.
 
     [X] Modificación de backend-node/server.js:
 
-        [X] Importación de consultarStockMateriasPrimas desde db_operations.js.
+        [X] Importación de funciones desde db_operations.js.
 
-        [X] Creación y prueba exitosa del endpoint GET /api/stock que llama a consultarStockMateriasPrimas() y devuelve JSON.
-
-        Actualización: Incluye todos los endpoints API para las nuevas tablas de la Fase 5.
+        [X] Endpoints API para las funcionalidades básicas.
 
     [X] Configuración Inicial del Frontend React:
 
         [X] Proyecto React creado con Vite dentro de frontend-react/.
 
-        [X] Dependencias de React instaladas (npm install).
+        [X] Dependencias de React instaladas.
 
-        [X] Componente frontend-react/src/App.jsx modificado para:
+        [X] Componente frontend-react/src/App.jsx modificado para navegación y visualización inicial.
 
-            [X] Hacer fetch al endpoint GET /api/stock del backend Node.js.
-
-            [X] Almacenar y mostrar los datos del stock en una tabla HTML (ahora como lista plana de bobinas individuales, ordenada).
-
-            [X] Manejar estados de carga y errores.
-
-        [X] Verificación exitosa de la comunicación React -> Node.js API -> SQLite y visualización de datos del stock.
-
-    [X] Script de siembra (seed_database.js) creado para poblar la base de datos con datos de prueba, incluyendo configuración de márgenes.
-
-        Actualización: Incluye datos de prueba para todas las nuevas tablas de la Fase 5.
+    [X] Script de siembra (seed_database.js) creado y actualizado para poblar la base de datos con datos de prueba coherentes con la estructura actual.
 
 Fase 1: Funcionalidad Básica de Stock (Lectura Avanzada y Escritura)
-1.3. Frontend (React) - Filtros Básicos para el Stock (COMPLETADO)
 
-* **Tarea:** Añadir controles de filtro básicos a la vista de stock en React.
-* **Detalles:**
-    * Desplegables para filtrar por `Material` y `Estado`.
-    * Campo de texto para búsqueda por `Referencia` o `Factura Origen` (y otros campos).
-    * Los filtros se aplican en el frontend después de obtener todos los datos, o podrían pasarse al backend.
-* **Backend (Node.js API):**
-    * Endpoint `/api/stock` devuelve todos los items (bobinas individuales).
-* **Entrega:** Vista de stock con capacidad de filtrado funcional.
+    1.3. Frontend (React) - Filtros Básicos para el Stock (COMPLETADO)
 
-1.4. Backend y Frontend - Visualización Detallada de Item de Stock (COMPLETADO)
+        Vista de stock con capacidad de filtrado funcional.
 
-* **Tarea:** Permitir al usuario ver todos los detalles de un ítem de stock específico (bobina).
-* **Backend (Node.js API):**
-    * Endpoint `GET /api/stock-item/:tabla/:id` devuelve todos los datos de un ítem de stock por su ID (funcionalidad inicial). (Nota: El modal de detalle de bobina en App.jsx ahora usa los datos ya cargados).
-* **Frontend (React):**
-    * Al hacer clic en un botón "Detalles" en una fila de la tabla de stock, se muestra un modal (`DetalleStockModal`) con todos los detalles de la bobina.
-* **Entrega:** Capacidad de ver información detallada de cada bobina de stock.
+    1.4. Backend y Frontend - Visualización Detallada de Item de Stock (COMPLETADO)
+
+        Capacidad de ver información detallada de cada bobina/item de stock en un modal.
 
 Fase 2: Creación de Nuevas Entradas (Pedidos Nacionales y Contenedores)
 
-Se ha generalizado para Goma, PVC y Fieltro.
-2.1. Backend (Node.js API) - Endpoints para Nuevos Pedidos (COMPLETADO)
+    2.1. Backend (Node.js API) - Endpoints para Nuevos Pedidos (COMPLETADO)
 
-* **Tarea:** En `server.js`, crear endpoints para `POST /api/pedidos-nacionales` y `POST /api/pedidos-importacion`.
-* **Detalles:**
-    * Reciben datos JSON del frontend (incluyendo `material_tipo` y `valor_conversion` para importación).
-    * Validación de datos.
-    * **Lógica de Negocio en Node.js:**
-        * Cálculo de costes por ítem, incluyendo manejo de gastos y conversión de moneda para importación.
-        * **Actualización:** La lógica de gastos repercutibles ahora excluye los gastos `SUPLIDOS` que contengan la palabra "IVA". La fórmula del precio por metro lineal se ha ajustado a `(precio metro lineal en dolares * valor de conversion) * (1 + porcentaje de gasto repercutible)`.
-        * **Operaciones de Base de Datos (en `db_operations.js` con `procesarNuevoPedido`):**
-            * Inserción en `PedidosProveedores`.
-            * Inserción en `GastosPedido`.
-            * Inserción de cada bobina como una nueva fila en `StockMateriasPrimas` (con `coste_unitario_final` calculado para esa bobina).
-    * Devolver respuesta JSON (éxito/error).
-* **Entrega:** Endpoints funcionales para crear pedidos nacionales y de importación para Goma, PVC y Fieltro.
+        Endpoints POST /api/pedidos-nacionales y POST /api/pedidos-importacion funcionales.
 
-2.2. Frontend (React) - Formularios para Nuevos Pedidos (COMPLETADO)
+        Validación de datos básica.
 
-* **Tarea:** Crear componentes React (`FormularioPedidoNacional.jsx`, `FormularioPedidoImportacion.jsx`).
-* **Detalles:**
-    * Campos para datos generales, selector de material.
-    * `FormularioPedidoImportacion.jsx` incluye campo para `valor_conversion` y tipos de gasto específicos.
-    * Interfaz para añadir/eliminar dinámicamente gastos y bobinas (líneas de pedido).
-    * Al enviar, recopilar datos, enviar como JSON a los endpoints correspondientes.
-    * Mostrar feedback al usuario.
-* **Entrega:** Formularios funcionales en React.
+        Lógica de cálculo de costes por ítem, incluyendo manejo de gastos y conversión de moneda para importación.
 
-2.3. Extender para Otros Tipos de Entrada (COMPLETADO)
+        Operaciones de Base de Datos para insertar en PedidosProveedores, GastosPedido, y StockMateriasPrimas (como bobinas individuales).
 
-* **Tarea:** Replicado y adaptado en los pasos 2.1 y 2.2 para:
-    * Pedidos Nacionales de Goma, PVC y Fieltro.
-    * Contenedores de Importación de Goma, PVC y Fieltro (incluyendo `valor_conversion` y estructura de gastos por tipo SUPLIDOS, EXENTO, SUJETO).
-* **Entrega:** Capacidad de crear todos los tipos de pedidos/contenedores.
+    2.2. Frontend (React) - Formularios para Nuevos Pedidos (COMPLETADO)
+
+        Componentes FormularioPedidoNacional.jsx y FormularioPedidoImportacion.jsx funcionales.
+
+        Interfaz para añadir/eliminar dinámicamente gastos y líneas de pedido.
+
+    2.3. Extender para Otros Tipos de Entrada (COMPLETADO)
+
+        Capacidad de crear todos los tipos de pedidos/contenedores para Goma, PVC y Fieltro.
 
 Fase 3: Gestión de Stock (Actualizaciones) y Visualización de Pedidos
-3.1. Backend y Frontend - Listar Pedidos/Contenedores (COMPLETADO)
 
-* **Tarea:** Crear endpoints y vistas React para listar Pedidos Nacionales y Contenedores.
-* **Backend:** Endpoint `GET /api/pedidos` con filtros.
-* **Frontend:** Componente `ListaPedidos.jsx` con filtros.
-* **Extensión:** Funcionalidad de doble clic en `ListaPedidos.jsx` para abrir `DetallePedidoModal.jsx` que muestra información del pedido, gastos y bobinas (usando endpoint `GET /api/pedidos/:pedidoId/detalles`).
-* **Entrega:** Vistas para consultar los pedidos y contenedores existentes con filtros y visualización de detalles.
+    3.1. Backend y Frontend - Listar Pedidos/Contenedores (COMPLETADO)
 
-3.2. Backend y Frontend - Actualizar Estado del Stock (COMPLETADO)
+        Endpoint GET /api/pedidos con filtros.
 
-* **Tarea:** Implementar la funcionalidad para marcar items de stock (bobinas) como "EMPEZADA" o "AGOTADO".
-* **Backend (API):** Endpoint `PATCH /api/stock-items/:stockItemId/estado` para actualizar el estado.
-* **Frontend (React):** Botones/acciones en la tabla de stock (`App.jsx`) para cambiar el estado.
-* **Entrega:** Funcionalidad completa para cambiar el estado.
+        Componente ListaPedidos.jsx con filtros y modal de detalle (DetallePedidoModal.jsx).
 
-3.3. Backend y Frontend - Eliminar Pedidos/Contenedores (COMPLETADO)
+    3.2. Backend y Frontend - Actualizar Estado del Stock (COMPLETADO)
 
-* **Tarea:** Implementar la funcionalidad para eliminar un pedido/contenedor completo.
-* **Backend (API):** Endpoint `DELETE /api/pedidos/:pedidoId`. Considera eliminación en cascada o manejo de stock asociado (actualmente elimina stock asociado).
-* **Frontend (React):** Botón de eliminar en `ListaPedidos.jsx` con confirmación.
-* **Entrega:** Capacidad de eliminar pedidos/contenedores.
+        Endpoint PATCH /api/stock-items/:stockItemId/estado para actualizar el estado.
+
+        Acciones en la tabla de stock (App.jsx) para cambiar el estado.
+
+    3.3. Backend y Frontend - Eliminar Pedidos/Contenedores (COMPLETADO)
+
+        Endpoint DELETE /api/pedidos/:pedidoId funcional (maneja eliminación de stock asociado).
+
+        Botón de eliminar en ListaPedidos.jsx con confirmación.
 
 Fase 4: Cálculo de Costes de Venta y Tarifa
-4.1. Backend (Node.js API) - Endpoint para Tarifa de Venta (COMPLETADO)
 
-* **Tarea:** Crear un endpoint `GET /api/tarifa-venta`.
-* **Detalles:**
-    * Obtener datos de stock (`coste_unitario_final` de `StockMateriasPrimas` para items 'DISPONIBLE' o 'EMPEZADA').
-    * Obtener márgenes de la tabla `Configuracion` (función `obtenerConfiguraciones` en `db_operations.js`). Márgenes por `tipo_tarifa` (final, fabricante, metrajes).
-    * Lógica de agrupación (material, subtipo, espesor, **ancho**) y cálculo del `max_cost` por grupo.
-    * Aplicar márgenes para calcular `precio_venta_aplicado_margen` según `tipo_tarifa` (parámetro query).
-    * Devolver `precio_metro_lineal_antes_margen`, `margen_aplicado` y `precio_venta_aplicado_margen`.
-* **Entrega:** Endpoint que provee los datos para la tarifa.
+    4.1. Backend (Node.js API) - Endpoint para Tarifa de Venta (COMPLETADO)
 
-4.2. Frontend (React) - Vista de Tarifa de Venta (COMPLETADO)
+        Endpoint GET /api/tarifa-venta que ahora calcula la tarifa basada en ProductosTerminados (plantillas) y sus coste_fabricacion_estandar.
 
-* **Tarea:** Crear un componente React (`TarifaVenta.jsx`) para mostrar la tarifa.
-* **Detalles:** Selector para `tipo_tarifa`. Tabla para mostrar los datos de la tarifa (material, subtipo, espesor, ancho, precio ML antes margen, margen, precio venta aplicado margen).
-* **Entrega:** Interfaz para visualizar la tarifa de venta.
+    4.2. Frontend (React) - Vista de Tarifa de Venta (COMPLETADO)
 
-Fase 5: Gestión de Maquinaria y Costes de Fabricación (COMPLETADA)
+        Componente TarifaVenta.jsx muestra la tarifa de productos terminados.
 
-    Tarea: Implementar la lógica y las interfaces para la gestión de maquinaria y el cálculo de costes de fabricación de productos terminados.
+Fase 5: Gestión de Fabricación (Plantillas de Producto, Maquinaria, Procesos, Órdenes)
 
-    Detalles:
+    5.1. Backend y Frontend - Gestión de Plantillas de Producto (EN PROGRESO / REVISADO)
 
-        [X] Nuevas Tablas de Base de Datos: ProductosTerminados, Maquinaria, Recetas, ProcesosFabricacion, OrdenesProduccion, StockProductosTerminados.
+        Tarea: Implementar la creación y gestión de "Plantillas de Producto" (anteriormente "Productos Terminados").
 
-        [X] Operaciones CRUD Completas (Backend): Endpoints API y funciones en db_operations.js para todas las nuevas tablas.
+        Detalles:
 
-        [X] Gestión de Productos Terminados y Recetas (Frontend y Backend):
+            [X] Tabla ProductosTerminados modificada:
 
-            Frontend: Componente GestionProductosRecetas.jsx combinado.
+                referencia ahora es UNIQUE pero no NOT NULL inicialmente (se genera en backend).
 
-            Backend: La tabla Recetas ya no requiere cantidad_requerida ni unidad_medida_requerida (se asume un modelo teórico).
+                Campo descripcion eliminado.
 
-            Backend: Al seleccionar un producto en la receta, se rellena su nombre y referencia.
+                Se utilizan material_principal, espesor_principal, ancho_final, largo_final para definir las características base de la plantilla.
 
-        [X] Gestión de Maquinaria (Frontend y Backend):
+            [X] Backend: Endpoint POST /api/productos-terminados modificado para:
 
-            Frontend: Componente GestionMaquinaria.jsx.
+                No esperar referencia ni descripcion del frontend.
 
-            Backend: La tabla Maquinaria ha simplificado sus campos, eliminando vida_util_horas y depreciacion_hora.
+                Generar referencia automáticamente (ej. "PT-0000X").
 
-        [X] Gestión de Procesos de Fabricación (Frontend y Backend):
+                Manejar la inserción en una transacción.
 
-            Frontend: Componente GestionProcesosFabricacion.jsx.
+                Llamar a actualizarCosteFabricacionEstandar (aunque el coste inicial puede ser 0 o basado en coste_extra_unitario si no hay recetas/procesos).
 
-            Backend: El coste_mano_obra_hora se ha eliminado de la tabla ProcesosFabricacion y ahora se utiliza un coste_mano_obra_default de la tabla Configuracion.
+            [X] Frontend: Componente GestionProductosRecetas.jsx (ahora "Gestión de Plantillas de Producto") modificado:
 
-        [X] Cálculo Automático del Coste de Fabricación Estándar:
+                Formulario de creación/edición no incluye campos para referencia (editable) ni descripcion.
 
-            Backend: Funciones para calcularCosteMateriales y calcularCosteProcesos (usando el coste de mano de obra por defecto y el coste por hora de operación de la maquinaria).
+                Se muestran los campos para material_principal, espesor_principal, ancho_final, largo_final.
 
-            Backend: actualizarCosteFabricacionEstandar recalcula y actualiza el coste_fabricacion_estandar en ProductosTerminados automáticamente al crear/modificar/eliminar recetas o procesos asociados.
+                Se calcula un coste de material estimado preliminar (coste) en el frontend y se envía como coste_fabricacion_estandar inicial.
 
-        [X] Gestión de Órdenes de Producción (Frontend y Backend):
+            [ ] Backend: Revisar actualizarCosteFabricacionEstandar para que use correctamente el ancho_bobina_mm de StockMateriasPrimas y las dimensiones (ancho_final, largo_final) del producto para el cálculo por m². (EN PROGRESO - depurando cálculo de coste)
 
-            Frontend: Componente GestionOrdenesProduccion.jsx.
+            [ ] Backend: Lógica de ON DELETE CASCADE para OrdenesProduccion y StockProductosTerminados en server.js al definir tablas (si es el comportamiento deseado). (IMPLEMENTADO, a verificar)
 
-            Backend: La tabla OrdenesProduccion usa un solo campo fecha en lugar de fecha_inicio y fecha_fin. El status se gestiona internamente pero no se expone en la UI de creación/edición.
+            [ ] Frontend: Corregir warnings de key y whitespace en tablas. (EN PROGRESO)
 
-            [X] Procesamiento de Órdenes de Producción: Endpoint POST /api/ordenes-produccion/:id/procesar que realiza una transacción para:
+    5.2. Backend y Frontend - Gestión de Recetas (COMPLETADO)
 
-                Verificar stock de materias primas/componentes.
+        Componente GestionRecetas.jsx (integrado en GestionProductosRecetas.jsx o como sección separada).
 
-                Descontar el stock de materias primas/componentes según la receta y la cantidad a producir (asumiendo 1 unidad de material por 1 unidad de producto si la receta es teórica).
+        Endpoints y lógica para CRUD de recetas asociadas a las plantillas de producto.
 
-                Calcular el coste real de fabricación de la orden.
+    5.3. Backend y Frontend - Gestión de Maquinaria (COMPLETADO)
 
-                Insertar el producto terminado en StockProductosTerminados.
+        Componente GestionMaquinaria.jsx.
 
-                Marcar la orden como COMPLETADA.
+        Endpoints y lógica para CRUD de maquinaria.
 
-        [X] Stock de Productos Terminados:
+    5.4. Backend y Frontend - Gestión de Procesos de Fabricación (COMPLETADO)
 
-            Frontend: Componente GestionStockProductosTerminados.jsx para visualizar el inventario de productos finales.
+        Componente GestionProcesosFabricacion.jsx.
 
-            Backend: Endpoints para consultar y eliminar ítems de StockProductosTerminados.
+        Endpoints y lógica para CRUD de procesos, asociándolos a plantillas de producto y maquinaria.
 
-    Entrega: Funcionalidad completa para la gestión de fabricación y productos terminados.
+    5.5. Backend y Frontend - Gestión de Órdenes de Producción (EN PROGRESO)
 
-Fase 6: Mejoras Continuas y Refinamiento (PENDIENTE)
+        Componente GestionOrdenesProduccion.jsx.
 
-    Tareas: Refactorización, optimización, mejoras UX/UI, documentación, pruebas. Considerar empaquetado como aplicación de escritorio (Electron/Tauri) si se desea.
+        Endpoints y lógica para CRUD de órdenes de producción.
 
-    Ideas:
+        [ ] Frontend: Al crear una orden, permitir seleccionar una "Plantilla de Producto".
 
-        Añadir funcionalidad para "Editar Pedido/Contenedor" de materias primas.
+        [ ] Frontend/Backend: Basado en el material_principal y espesor_principal de la plantilla, permitir seleccionar una bobina específica de StockMateriasPrimas con suficiente material.
 
-        Implementar gestión de ventas y salida de stock de productos terminados.
+        [ ] Backend: Endpoint POST /api/ordenes-produccion/:id/procesar para:
 
-        Alertas de stock mínimo.
+            Verificar y descontar stock de materias primas (de la bobina seleccionada).
 
-        Informes y analíticas más avanzadas.
+            Calcular coste real de fabricación de la orden.
 
-        Manejo de usuarios y roles.
+            Añadir producto terminado a StockProductosTerminados.
 
-        [PENDIENTE] Depuración detallada de los valores NaN y el porcentaje de gastos en DetallePedidoModal.jsx si persiste el problema.
+            Marcar orden como "COMPLETADA".
+
+    5.6. Backend y Frontend - Stock de Productos Terminados (COMPLETADO)
+
+        Componente GestionStockProductosTerminados.jsx para visualizar el inventario.
+
+        Endpoints para consultar y eliminar ítems de StockProductosTerminados.
+
+    5.7. Backend y Frontend - Herramientas (Calculadora de Presupuestos y Configuración) (COMPLETADO)
+
+        Componente CalculadoraPresupuestos.jsx.
+
+        Componente FormularioConfiguracion.jsx.
+
+Fase 6: Mejoras Continuas y Refinamiento (PENDIENTE / EN CURSO)
+
+    [ ] Depuración detallada de los valores NaN en cálculos de costes si persisten.
+
+    [ ] Revisión y mejora de la UX/UI general.
+
+    [ ] Optimización de consultas a la base de datos (ej. uso de índices).
+
+    [ ] Validación de datos más robusta (frontend y backend).
+
+    [ ] Mejorar el manejo de errores y el feedback al usuario.
+
+    [ ] Revisión y ajuste de la lógica de cálculo de costes para asegurar precisión.
+
+    [ ] Implementar gestión de ventas y salida de stock de productos terminados.
+
+    [ ] Alertas de stock mínimo para materias primas y productos terminados.
+
+    [ ] Informes y analíticas más avanzadas (valor de inventario, rentabilidad).
+
+    [ ] Considerar empaquetado como aplicación de escritorio (Electron/Tauri).
