@@ -137,25 +137,24 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 // En backend-node/server.js
 
+// En backend-node/server.js
+
 function crearTablasSiNoExisten() {
     db.serialize(() => {
-        console.log("Verificando/Creando tablas con la nueva estructura...");
+        console.log("Verificando/Creando tablas con la nueva estructura normalizada...");
 
         // 1. Tabla Maestra de Artículos (reemplaza a ProductosTerminados y las descripciones de Stock)
         db.run(`CREATE TABLE IF NOT EXISTS Items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sku TEXT UNIQUE NOT NULL,                       -- Código único de artículo (ej: GOM-EPDM-6-1000)
+            sku TEXT UNIQUE NOT NULL,                       -- Código de artículo único (ej: GOM-EPDM-6-1000)
             descripcion TEXT NOT NULL,
             tipo_item TEXT NOT NULL CHECK(tipo_item IN ('MATERIA_PRIMA', 'COMPONENTE', 'PRODUCTO_TERMINADO')),
             familia TEXT,                                   -- GOMA, FIELTRO, FALDETAS...
             espesor TEXT,
             ancho REAL,
             unidad_medida TEXT NOT NULL,                    -- m, kg, unidad
-            coste_estandar REAL DEFAULT 0                   -- Coste de fabricación (para productos) o último coste conocido (para materias)
-        )`, (err) => {
-            if (err) console.error("Error creando tabla Items:", err.message);
-            else console.log("Tabla 'Items' verificada/creada.");
-        });
+            coste_estandar REAL DEFAULT 0
+        )`, (err) => { if (err) console.error("Error creando tabla Items:", err.message); });
 
         // 2. Tablas de Compras (se mantienen pero LineasPedido ahora apunta a Items)
         db.run(`CREATE TABLE IF NOT EXISTS PedidosProveedores (
@@ -164,10 +163,10 @@ function crearTablasSiNoExisten() {
             proveedor TEXT,
             fecha_pedido TEXT,
             fecha_llegada TEXT,
-            origen_tipo TEXT NOT NULL CHECK(origen_tipo IN ('CONTENEDOR', 'NACIONAL')),
+            origen_tipo TEXT NOT NULL,
             observaciones TEXT,
             valor_conversion REAL
-        )`, (err) => { if (err) console.error("Error creando tabla PedidosProveedores:", err.message); else console.log("Tabla 'PedidosProveedores' verificada/creada."); });
+        )`, (err) => { if (err) console.error("Error creando tabla PedidosProveedores:", err.message); });
 
         db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,82 +175,44 @@ function crearTablasSiNoExisten() {
             descripcion TEXT NOT NULL,
             coste_eur REAL NOT NULL,
             FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
-        )`, (err) => { if (err) console.error("Error creando tabla GastosPedido:", err.message); else console.log("Tabla 'GastosPedido' verificada/creada."); });
+        )`, (err) => { if (err) console.error("Error creando tabla GastosPedido:", err.message); });
 
         db.run(`CREATE TABLE IF NOT EXISTS LineasPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,                         -- AHORA APUNTA A UN ITEM ESPECiFICO
+            item_id INTEGER NOT NULL,
             cantidad_original REAL NOT NULL,
             precio_unitario_original REAL NOT NULL,
             moneda_original TEXT,
             FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE,
             FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE RESTRICT
-        )`, (err) => { if (err) console.error("Error creando tabla LineasPedido:", err.message); else console.log("Tabla 'LineasPedido' verificada/creada."); });
-
+        )`, (err) => { if (err) console.error("Error creando tabla LineasPedido:", err.message); });
 
         // 3. Nueva Tabla de Stock Unificada
         db.run(`CREATE TABLE IF NOT EXISTS Stock (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER NOT NULL,
-            lote TEXT NOT NULL UNIQUE,                      -- Lote del proveedor o generado internamente
-            cantidad_inicial REAL NOT NULL,
+            lote TEXT NOT NULL UNIQUE,
             cantidad_actual REAL NOT NULL,
-            coste_lote REAL NOT NULL,                       -- El coste real de ESE lote específico (por unidad de medida del item)
+            coste_lote REAL NOT NULL,
             ubicacion TEXT,
-            pedido_id INTEGER,                              -- Pedido de compra (si aplica)
-            orden_produccion_id INTEGER,                    -- Orden de producción (si aplica)
+            pedido_id INTEGER,
             fecha_entrada TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'DISPONIBLE',
             FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE,
-            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL,
-            FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
-        )`, (err) => {
-            if (err) console.error("Error creando tabla Stock:", err.message);
-            else console.log("Tabla 'Stock' verificada/creada.");
-        });
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL
+        )`, (err) => { if (err) console.error("Error creando tabla Stock:", err.message); });
 
         // 4. Tablas de Fabricación (ahora apuntan a Items)
-        db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL UNIQUE,
-            descripcion TEXT,
-            coste_hora_operacion REAL
-        )`, (err) => { if (err) console.error("Error creando tabla Maquinaria:", err.message); else console.log("Tabla 'Maquinaria' verificada/creada."); });
-
         db.run(`CREATE TABLE IF NOT EXISTS Recetas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_id INTEGER NOT NULL,                     -- ID de un PRODUCTO_TERMINADO de la tabla Items
-            material_id INTEGER NOT NULL,                     -- ID de una MATERIA_PRIMA o COMPONENTE de la tabla Items
+            producto_id INTEGER NOT NULL,
+            material_id INTEGER NOT NULL,
             cantidad_requerida REAL NOT NULL,
-            notas TEXT,
             FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
             FOREIGN KEY(material_id) REFERENCES Items(id) ON DELETE RESTRICT
-        )`, (err) => { if (err) console.error("Error creando tabla Recetas:", err.message); else console.log("Tabla 'Recetas' verificada/creada."); });
-        
-        db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_id INTEGER NOT NULL,                     -- APUNTA A ITEMS
-            maquinaria_id INTEGER NOT NULL,
-            nombre_proceso TEXT NOT NULL,
-            tiempo_estimado_segundos INTEGER NOT NULL,
-            aplica_a_clientes TEXT,
-            FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
-            FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id) ON DELETE RESTRICT
-        )`, (err) => { if (err) console.error("Error creando tabla ProcesosFabricacion:", err.message); else console.log("Tabla 'ProcesosFabricacion' verificada/creada."); });
+        )`, (err) => { if (err) console.error("Error creando tabla Recetas:", err.message); });
 
-        db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_id INTEGER NOT NULL,                         -- APUNTA A ITEMS
-            cantidad_a_producir REAL NOT NULL,
-            fecha TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'PENDIENTE',
-            coste_real_fabricacion REAL,
-            observaciones TEXT,
-            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE RESTRICT
-        )`, (err) => { if (err) console.error("Error creando tabla OrdenesProduccion:", err.message); else console.log("Tabla 'OrdenesProduccion' verificada/creada."); });
-        
-        console.log("Verificación/Creación de todas las tablas completada.");
+        console.log("Verificación/Creación de tablas completada.");
     });
 }
 

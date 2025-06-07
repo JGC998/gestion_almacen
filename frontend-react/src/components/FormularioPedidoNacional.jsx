@@ -1,5 +1,4 @@
-// En frontend-react/src/components/FormularioPedidoNacional.jsx
-
+// frontend-react/src/components/FormularioPedidoNacional.jsx
 import { useState, useEffect } from 'react';
 import './FormularioPedido.css';
 
@@ -14,7 +13,7 @@ function FormularioPedidoNacional() {
   });
 
   const [lineas, setLineas] = useState([
-    { temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '' }
+    { temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '', ubicacion: '' }
   ]);
 
   const [gastos, setGastos] = useState([]);
@@ -22,11 +21,9 @@ function FormularioPedidoNacional() {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Cargar los items de tipo MATERIA_PRIMA al montar el componente
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        // Este endpoint lo crearemos en el siguiente paso
         const response = await fetch('http://localhost:5002/api/items?tipo_item=MATERIA_PRIMA');
         if (!response.ok) throw new Error('No se pudieron cargar los artículos');
         const data = await response.json();
@@ -57,12 +54,13 @@ function FormularioPedidoNacional() {
   };
 
   const addLinea = () => {
-    setLineas(prev => [...prev, { temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '' }]);
+    setLineas(prev => [...prev, { temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '', ubicacion: '' }]);
   };
 
   const removeLinea = (index) => {
-    if (lineas.length <= 1) return;
-    setLineas(prev => prev.filter((_, i) => i !== index));
+    if (lineas.length > 1) {
+      setLineas(prev => prev.filter((_, i) => i !== index));
+    }
   };
 
   const addGasto = () => {
@@ -70,7 +68,9 @@ function FormularioPedidoNacional() {
   };
 
   const removeGasto = (index) => {
-    setGastos(prev => prev.filter((_, i) => i !== index));
+    if (gastos.length > 0) {
+      setGastos(prev => prev.filter((_, i) => i !== index));
+    }
   };
   
   const handleSubmit = async (e) => {
@@ -79,21 +79,25 @@ function FormularioPedidoNacional() {
 
     const lineasParaEnviar = lineas.map(({ temp_id, ...rest }) => ({
       ...rest,
-      // Aseguramos que los valores sean numéricos
       item_id: parseInt(rest.item_id, 10),
       cantidad_original: parseFloat(rest.cantidad_original),
       precio_unitario_original: parseFloat(rest.precio_unitario_original),
-      moneda_original: 'EUR' // Moneda fija para pedidos nacionales
+      moneda_original: 'EUR'
     }));
+
+    if (lineasParaEnviar.some(l => !l.item_id || isNaN(l.item_id))) {
+        setError("Todas las líneas deben tener un artículo seleccionado.");
+        setLoading(false);
+        return;
+    }
 
     const payload = {
       pedido: { ...pedido, origen_tipo: 'NACIONAL' },
       lineas: lineasParaEnviar,
-      gastos: gastos,
+      gastos,
     };
 
     try {
-      // Este endpoint ya está preparado para la nueva lógica en db_operations
       const response = await fetch('http://localhost:5002/api/pedidos-nacionales', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -102,6 +106,10 @@ function FormularioPedidoNacional() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.detalle || `Error del servidor`);
       setSuccessMessage(`¡Pedido Nacional (ID: ${data.pedidoId}) creado con éxito!`);
+      setLineas([{ temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '', ubicacion: '' }]);
+      setGastos([]);
+      setPedido({ numero_factura: '', proveedor: '', fecha_pedido: new Date().toISOString().split('T')[0], fecha_llegada: '', observaciones: ''});
+
     } catch (err) {
       setError(err.message);
     } finally {
@@ -122,14 +130,15 @@ function FormularioPedidoNacional() {
             <label>Nº Factura: <input type="text" name="numero_factura" value={pedido.numero_factura} onChange={handlePedidoChange} required /></label>
             <label>Proveedor: <input type="text" name="proveedor" value={pedido.proveedor} onChange={handlePedidoChange} /></label>
             <label>Fecha Pedido: <input type="date" name="fecha_pedido" value={pedido.fecha_pedido} onChange={handlePedidoChange} required /></label>
+            <label>Fecha Llegada: <input type="date" name="fecha_llegada" value={pedido.fecha_llegada} onChange={handlePedidoChange} required /></label>
           </div>
         </fieldset>
 
-        <h3>Bobinas del Pedido</h3>
+        <h3>Líneas del Pedido</h3>
         {lineas.map((linea, index) => (
           <fieldset key={linea.temp_id} className="linea-item">
-            <legend>Bobina {index + 1}</legend>
-            <div className="form-grid-lineas">
+            <legend>Línea {index + 1}</legend>
+            <div className="form-grid-lineas" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
               <label>Artículo (Materia Prima)*:
                 <select name="item_id" value={linea.item_id} onChange={(e) => handleLineaChange(index, e)} required>
                   <option value="">-- Selecciona un artículo --</option>
@@ -140,8 +149,9 @@ function FormularioPedidoNacional() {
                   ))}
                 </select>
               </label>
-              <label>Cantidad (m, kg, etc.)*: <input type="number" step="0.01" name="cantidad_original" value={linea.cantidad_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
+              <label>Cantidad*: <input type="number" step="0.01" name="cantidad_original" value={linea.cantidad_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
               <label>Precio Unitario (€)*: <input type="number" step="0.01" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
+              <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(index, e)} /></label>
             </div>
             {lineas.length > 1 && <button type="button" onClick={() => removeLinea(index)} className="remove-btn">Eliminar Línea</button>}
           </fieldset>

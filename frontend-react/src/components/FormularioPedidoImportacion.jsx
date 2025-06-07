@@ -149,8 +149,8 @@ function FormularioPedidoImportacion() {
                 <option value="GOMA">GOMA</option>
                 <option value="PVC">PVC</option>
                 <option value="FIELTRO">FIELTRO</option>
-                <option value="FIELTRO">VERDE</option>
-                <option value="FIELTRO">CARAMELO</option>
+                <option value="VERDE">VERDE</option>
+                <option value="CARAMELO">CARAMELO</option>
 
 
               </select>
@@ -171,20 +171,19 @@ function FormularioPedidoImportacion() {
             <label>Nº Factura: <input type="text" name="numero_factura" value={pedido.numero_factura} onChange={handlePedidoChange} required /></label>
             <label>Proveedor: <input type="text" name="proveedor" value={pedido.proveedor} onChange={handlePedidoChange} /></label>
             <label>Fecha Pedido: <input type="date" name="fecha_pedido" value={pedido.fecha_pedido} onChange={handlePedidoChange} required /></label>
-            <label>Fecha Llegada: <input type="date" name="fecha_llegada" value={pedido.fecha_llegada} onChange={handlePedidoChange} required /></label>
           </div>
           <label>Observaciones: <textarea name="observaciones" value={pedido.observaciones} onChange={handlePedidoChange}></textarea></label>
         </fieldset>
 
-        <h3>Líneas del Pedido ({materialTipo})</h3>
+        <h3>Bobinas ({materialTipo})</h3>
         {lineas.map((linea, index) => (
           <fieldset key={linea.temp_id} className="linea-item">
             <legend>Línea {index + 1}</legend>
             <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))'}}>
-              <label>Ref. Stock*: <input type="text" name="referencia_stock" value={linea.referencia_stock} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Espesor: <input type="text" name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(index, e)} /></label>
+              <label>Ref(8+3, Fieltro15, B3): <input type="text" name="referencia_stock" value={linea.referencia_stock} onChange={(e) => handleLineaChange(index, e)} required /></label>
+              <label>Espesor(6mm, F15, 3mm): <input type="text" name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Ancho (mm): <input type="number" name="ancho" value={linea.ancho} onChange={(e) => handleLineaChange(index, e)} /></label>
-              <label>Color: <input type="text" name="color" value={linea.color} onChange={(e) => handleLineaChange(index, e)} /></label>
+              <label>Color(Para el PVC): <input type="text" name="color" value={linea.color} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Cantidad ({linea.unidad_medida})*: <input type="number" step="0.01" name="cantidad_original" value={linea.cantidad_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
               <label>Moneda Lín.:
                 <select name="moneda_original" value={linea.moneda_original} onChange={(e) => handleLineaChange(index, e)}>
@@ -196,7 +195,7 @@ function FormularioPedidoImportacion() {
               <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Peso Total (kg): <input type="number" step="0.01" name="peso_total_kg" value={linea.peso_total_kg} onChange={(e) => handleLineaChange(index, e)} placeholder="Peso de esta bobina/lote" /></label> {/* NUEVO CAMPO */}
             </div>
-            <label>Notas Línea: <textarea name="notas_linea" value={linea.notas_linea} onChange={(e) => handleLineaChange(index, e)}></textarea></label>
+            <label>Comentarios: <textarea name="notas_linea" value={linea.notas_linea} onChange={(e) => handleLineaChange(index, e)}></textarea></label>
             {lineas.length > 1 && <button type="button" onClick={() => removeLinea(index)} className="remove-btn">Eliminar</button>}
           </fieldset>
         ))}
