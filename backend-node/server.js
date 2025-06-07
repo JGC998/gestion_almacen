@@ -5,10 +5,11 @@ const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 
+
+
 // --- Importar funciones de db_operations.js ---
 const {
-    consultarStockMateriasPrimas,
-    consultarStockComponentes,
+    consultarStock,
     consultarItemStockPorId,
     procesarNuevoPedido,
     consultarListaPedidos,
@@ -63,6 +64,8 @@ const {
 
     obtenerConfiguracion,
     actualizarConfiguracion,
+
+    consultarItems,
 
     conectarDB,
     runAsync
@@ -132,11 +135,29 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// Función para crear todas las tablas necesarias en la base de datos
+// En backend-node/server.js
+
 function crearTablasSiNoExisten() {
     db.serialize(() => {
-        console.log("Verificando/Creando tablas esenciales...");
+        console.log("Verificando/Creando tablas con la nueva estructura...");
 
+        // 1. Tabla Maestra de Artículos (reemplaza a ProductosTerminados y las descripciones de Stock)
+        db.run(`CREATE TABLE IF NOT EXISTS Items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sku TEXT UNIQUE NOT NULL,                       -- Código único de artículo (ej: GOM-EPDM-6-1000)
+            descripcion TEXT NOT NULL,
+            tipo_item TEXT NOT NULL CHECK(tipo_item IN ('MATERIA_PRIMA', 'COMPONENTE', 'PRODUCTO_TERMINADO')),
+            familia TEXT,                                   -- GOMA, FIELTRO, FALDETAS...
+            espesor TEXT,
+            ancho REAL,
+            unidad_medida TEXT NOT NULL,                    -- m, kg, unidad
+            coste_estandar REAL DEFAULT 0                   -- Coste de fabricación (para productos) o último coste conocido (para materias)
+        )`, (err) => {
+            if (err) console.error("Error creando tabla Items:", err.message);
+            else console.log("Tabla 'Items' verificada/creada.");
+        });
+
+        // 2. Tablas de Compras (se mantienen pero LineasPedido ahora apunta a Items)
         db.run(`CREATE TABLE IF NOT EXISTS PedidosProveedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             numero_factura TEXT NOT NULL UNIQUE,
@@ -146,223 +167,91 @@ function crearTablasSiNoExisten() {
             origen_tipo TEXT NOT NULL CHECK(origen_tipo IN ('CONTENEDOR', 'NACIONAL')),
             observaciones TEXT,
             valor_conversion REAL
-        )`, (err) => {
-            if (err) console.error("Error creando tabla PedidosProveedores:", err.message);
-            else console.log("Tabla PedidosProveedores verificada/creada.");
-        });
-
-        db.run(`CREATE TABLE IF NOT EXISTS LineasPedido (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pedido_id INTEGER NOT NULL,
-            descripcion_original TEXT,
-            cantidad_original REAL NOT NULL,
-            unidad_original TEXT NOT NULL,
-            precio_unitario_original REAL NOT NULL,
-            moneda_original TEXT CHECK(moneda_original IN ('USD', 'EUR')),
-            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
-        )`, (err) => {
-            if (err) console.error("Error creando tabla LineasPedido:", err.message);
-            else console.log("Tabla LineasPedido verificada/creada.");
-        });
+        )`, (err) => { if (err) console.error("Error creando tabla PedidosProveedores:", err.message); else console.log("Tabla 'PedidosProveedores' verificada/creada."); });
 
         db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER NOT NULL,
-            tipo_gasto TEXT CHECK(tipo_gasto IN ('SUPLIDOS', 'EXENTO', 'SUJETO', 'NACIONAL', 'OTRO')),
+            tipo_gasto TEXT,
             descripcion TEXT NOT NULL,
             coste_eur REAL NOT NULL,
             FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
-        )`, (err) => {
-            if (err) console.error("Error creando tabla GastosPedido:", err.message);
-            else console.log("Tabla GastosPedido verificada/creada.");
-        });
+        )`, (err) => { if (err) console.error("Error creando tabla GastosPedido:", err.message); else console.log("Tabla 'GastosPedido' verificada/creada."); });
 
-        db.run(`CREATE TABLE IF NOT EXISTS StockMateriasPrimas (
+        db.run(`CREATE TABLE IF NOT EXISTS LineasPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pedido_id INTEGER,
-            material_tipo TEXT NOT NULL CHECK(material_tipo IN ('GOMA', 'PVC', 'FIELTRO', 'MAQUINARIA', 'COMPONENTE')),
-            subtipo_material TEXT,
-            referencia_stock TEXT NOT NULL UNIQUE,
-            fecha_entrada_almacen TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO')),
-            espesor TEXT,
-            ancho REAL,
-            largo_inicial REAL,
-            largo_actual REAL,
-            unidad_medida TEXT NOT NULL DEFAULT 'm',
-            coste_unitario_final REAL,
-            color TEXT,
-            ubicacion TEXT,
-            notas TEXT,
-            origen_factura TEXT,
-            peso_total_kg REAL,
-            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL
-        )`, (err) => {
-            if (err) console.error("Error creando tabla StockMateriasPrimas:", err.message);
-            else console.log("Tabla StockMateriasPrimas verificada/creada.");
-        });
+            pedido_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,                         -- AHORA APUNTA A UN ITEM ESPECiFICO
+            cantidad_original REAL NOT NULL,
+            precio_unitario_original REAL NOT NULL,
+            moneda_original TEXT,
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE,
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE RESTRICT
+        )`, (err) => { if (err) console.error("Error creando tabla LineasPedido:", err.message); else console.log("Tabla 'LineasPedido' verificada/creada."); });
 
-        db.run(`CREATE TABLE IF NOT EXISTS StockComponentes (
+
+        // 3. Nueva Tabla de Stock Unificada
+        db.run(`CREATE TABLE IF NOT EXISTS Stock (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            componente_ref TEXT NOT NULL UNIQUE,
-            descripcion TEXT,
-            pedido_id INTEGER,
+            item_id INTEGER NOT NULL,
+            lote TEXT NOT NULL UNIQUE,                      -- Lote del proveedor o generado internamente
             cantidad_inicial REAL NOT NULL,
             cantidad_actual REAL NOT NULL,
-            unidad_medida TEXT NOT NULL DEFAULT 'ud',
-            coste_unitario_final REAL NOT NULL,
-            fecha_entrada_almacen TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'AGOTADO', 'RESERVADO', 'DESCATALOGADO')),
+            coste_lote REAL NOT NULL,                       -- El coste real de ESE lote específico (por unidad de medida del item)
             ubicacion TEXT,
-            notas TEXT,
-            origen_factura TEXT,
-            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL
+            pedido_id INTEGER,                              -- Pedido de compra (si aplica)
+            orden_produccion_id INTEGER,                    -- Orden de producción (si aplica)
+            fecha_entrada TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'DISPONIBLE',
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE,
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL,
+            FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
         )`, (err) => {
-            if (err) console.error("Error creando tabla StockComponentes:", err.message);
-            else console.log("Tabla StockComponentes verificada/creada.");
+            if (err) console.error("Error creando tabla Stock:", err.message);
+            else console.log("Tabla 'Stock' verificada/creada.");
         });
 
-        db.run(`CREATE TABLE IF NOT EXISTS ProductosTerminados (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            referencia TEXT UNIQUE, /* CAMBIADO: Eliminado NOT NULL. Se generará y actualizará después. */
-            nombre TEXT NOT NULL,
-            /* descripcion TEXT, -- YA ELIMINADO EN TU CÓDIGO */
-            unidad_medida TEXT NOT NULL DEFAULT 'unidad',
-            coste_fabricacion_estandar REAL,
-            material_principal TEXT,
-            espesor_principal TEXT,
-            ancho_final REAL,
-            largo_final REAL,
-            coste_extra_unitario REAL,
-            fecha_creacion TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK(status IN ('ACTIVO', 'DESCATALOGADO', 'OBSOLETO'))
-        )`, (err) => {
-            if (err) {
-                console.error("Error creando tabla ProductosTerminados:", err.message);
-            } else {
-                console.log("Tabla ProductosTerminados verificada/creada.");
-                // El resto de tu lógica para ALTER TABLE (para material_principal, etc.) se mantiene.
-                db.all(`PRAGMA table_info(ProductosTerminados);`, [], (pragmaErr, rows) => {
-                    if (pragmaErr) {
-                        console.error("Error al obtener información de tabla ProductosTerminados:", pragmaErr.message);
-                        return;
-                    }
-                    if (rows && rows.length > 0) {
-                        const columnNames = rows.map(col => col.name);
-                        const columnsToAdd = [ // Definir columnas a añadir si no existen
-                            { name: 'material_principal', type: 'TEXT' },
-                            { name: 'espesor_principal', type: 'TEXT' },
-                            { name: 'ancho_final', type: 'REAL' },
-                            { name: 'largo_final', type: 'REAL' },
-                            { name: 'coste_extra_unitario', type: 'REAL' }
-                        ];
-                        columnsToAdd.forEach(colDef => {
-                            if (!columnNames.includes(colDef.name)) {
-                                db.run(`ALTER TABLE ProductosTerminados ADD COLUMN ${colDef.name} ${colDef.type}`, (alterErr) => {
-                                    if (alterErr) console.error(`Error añadiendo columna ${colDef.name}:`, alterErr.message);
-                                    else console.log(`Columna ${colDef.name} añadida a ProductosTerminados.`);
-                                });
-                            }
-                        });
-                        // Si la columna 'descripcion' todavía existe y quieres asegurarte de que se elimine:
-                        // if (columnNames.includes('descripcion')) {
-                        //     db.run(`ALTER TABLE ProductosTerminados DROP COLUMN descripcion;`, (dropErr) => {
-                        //         if (dropErr) console.error("Error eliminando columna descripcion (si existía):", dropErr.message);
-                        //         else console.log("Columna descripcion eliminada de ProductosTerminados (si existía).");
-                        //     });
-                        // }
-                    }
-                });
-            }
-        });
-
-
+        // 4. Tablas de Fabricación (ahora apuntan a Items)
         db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT NOT NULL UNIQUE,
             descripcion TEXT,
-            coste_adquisicion REAL,
             coste_hora_operacion REAL
-        )`, (err) => {
-            if (err) console.error("Error creando tabla Maquinaria:", err.message);
-            else console.log("Tabla Maquinaria verificada/creada.");
-        });
+        )`, (err) => { if (err) console.error("Error creando tabla Maquinaria:", err.message); else console.log("Tabla 'Maquinaria' verificada/creada."); });
 
-        // MODIFICADA: Tabla Recetas para ser genérica
         db.run(`CREATE TABLE IF NOT EXISTS Recetas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_terminado_id INTEGER NOT NULL,
-            material_tipo_generico TEXT CHECK(material_tipo_generico IN ('GOMA', 'PVC', 'FIELTRO')),
-            subtipo_material_generico TEXT,
-            espesor_generico TEXT,
-            ancho_generico REAL,
-            color_generico TEXT,
-            componente_ref_generico TEXT,
+            producto_id INTEGER NOT NULL,                     -- ID de un PRODUCTO_TERMINADO de la tabla Items
+            material_id INTEGER NOT NULL,                     -- ID de una MATERIA_PRIMA o COMPONENTE de la tabla Items
             cantidad_requerida REAL NOT NULL,
-            unidad_medida_requerida TEXT NOT NULL,
-            unidades_por_ancho_material REAL,
-            peso_por_unidad_producto REAL,
             notas TEXT,
-            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
-            CHECK (
-                (material_tipo_generico IS NOT NULL AND componente_ref_generico IS NULL) OR
-                (material_tipo_generico IS NULL AND componente_ref_generico IS NOT NULL)
-            )
-        )`, (err) => {
-            if (err) console.error("Error creando tabla Recetas:", err.message);
-            else console.log("Tabla Recetas verificada/creada.");
-        });
-
-        // --- MODIFICACIÓN AQUÍ para ON DELETE CASCADE ---
+            FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
+            FOREIGN KEY(material_id) REFERENCES Items(id) ON DELETE RESTRICT
+        )`, (err) => { if (err) console.error("Error creando tabla Recetas:", err.message); else console.log("Tabla 'Recetas' verificada/creada."); });
+        
         db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_terminado_id INTEGER NOT NULL,
+            producto_id INTEGER NOT NULL,                     -- APUNTA A ITEMS
             maquinaria_id INTEGER NOT NULL,
             nombre_proceso TEXT NOT NULL,
-            tiempo_estimado_horas REAL NOT NULL,
+            tiempo_estimado_segundos INTEGER NOT NULL,
             aplica_a_clientes TEXT,
-            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
+            FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
             FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id) ON DELETE RESTRICT
-        )`, (err) => {
-            if (err) console.error("Error creando tabla ProcesosFabricacion:", err.message);
-            else console.log("Tabla ProcesosFabricacion verificada/creada.");
-        });
+        )`, (err) => { if (err) console.error("Error creando tabla ProcesosFabricacion:", err.message); else console.log("Tabla 'ProcesosFabricacion' verificada/creada."); });
 
-        // --- MODIFICACIÓN AQUÍ para ON DELETE CASCADE ---
         db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_terminado_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,                         -- APUNTA A ITEMS
             cantidad_a_producir REAL NOT NULL,
             fecha TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK(status IN ('PENDIENTE', 'EN_PROCESO', 'COMPLETADA', 'CANCELADA')),
+            status TEXT NOT NULL DEFAULT 'PENDIENTE',
             coste_real_fabricacion REAL,
             observaciones TEXT,
-            FOREIGN KEY(producto_terminado_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE
-        )`, (err) => {
-            if (err) console.error("Error creando tabla OrdenesProduccion:", err.message);
-            else console.log("Tabla OrdenesProduccion verificada/creada.");
-        });
-
-        // --- MODIFICACIÓN AQUÍ para ON DELETE CASCADE ---
-        db.run(`CREATE TABLE IF NOT EXISTS StockProductosTerminados (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_id INTEGER NOT NULL,
-            orden_produccion_id INTEGER,
-            cantidad_actual REAL NOT NULL,
-            unidad_medida TEXT NOT NULL DEFAULT 'unidad',
-            coste_unitario_final REAL NOT NULL,
-            fecha_entrada_almacen TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK(status IN ('DISPONIBLE', 'RESERVADO', 'AGOTADO', 'DAÑADO')),
-            ubicacion TEXT,
-            notas TEXT,
-            FOREIGN KEY(producto_id) REFERENCES ProductosTerminados(id) ON DELETE CASCADE,
-            FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
-        )`, (err) => {
-            if (err) console.error("Error creando tabla StockProductosTerminados:", err.message);
-            else console.log("Tabla StockProductosTerminados verificada/creada.");
-        });
-
-        console.log("Verificación/Creación de todas las tablas esenciales completada.");
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE RESTRICT
+        )`, (err) => { if (err) console.error("Error creando tabla OrdenesProduccion:", err.message); else console.log("Tabla 'OrdenesProduccion' verificada/creada."); });
+        
+        console.log("Verificación/Creación de todas las tablas completada.");
     });
 }
 
@@ -374,12 +263,11 @@ app.get('/api/estado', (req, res) => {
 });
 
 app.get('/api/stock', async (req, res) => {
-    console.log('Node.js: Se ha solicitado GET /api/stock');
+    console.log('Node.js: Solicitud a GET /api/stock (con nueva estructura)');
     try {
         const filtros = req.query;
-        console.log('Node.js: Filtros recibidos en /api/stock:', filtros);
-        const stockItems = await consultarStockMateriasPrimas(filtros);
-        console.log(`Node.js: Devolviendo ${stockItems.length} items de stock (con filtros aplicados).`);
+        const stockItems = await consultarStock(filtros); // <-- LLAMADA A LA NUEVA FUNCIÓN
+        console.log(`Node.js: Devolviendo ${stockItems.length} lotes de stock.`);
         res.json(stockItems);
     } catch (error) {
         console.error("Error en el endpoint /api/stock:", error.message);
@@ -470,6 +358,18 @@ app.get('/api/pedidos/:pedidoId/detalles', async (req, res) => {
     } catch (error) {
         console.error(`Error en el endpoint /api/pedidos/${pedidoId}/detalles:`, error.message);
         res.status(500).json({ error: "Error interno del servidor al obtener los detalles del pedido.", detalle: error.message });
+    }
+});
+
+app.get('/api/items', async (req, res) => {
+    console.log('Node.js: Solicitud a GET /api/items');
+    try {
+        const filtros = req.query; // para filtrar por ej. ?tipo_item=MATERIA_PRIMA
+        const items = await consultarItems(filtros);
+        res.json(items);
+    } catch (error) {
+        console.error("Error en el endpoint /api/items:", error.message);
+        res.status(500).json({ error: "Error interno del servidor al obtener los items."});
     }
 });
 
@@ -765,7 +665,7 @@ app.post('/api/productos-terminados', async (req, res) => {
         // El 'coste_fabricacion_estandar' enviado desde el frontend (productoData.coste_fabricacion_estandar)
         // es el coste de material estimado, que se guarda inicialmente por insertarProductoTerminado.
         // Esta llamada lo recalculará (o lo confirmará si la lógica de cálculo da el mismo resultado).
-        await actualizarCosteFabricacionEstandar(db, productoId, appConfig);
+        await actualizarCosteFabricacionEstandar(productoId, appConfig);
 
         await runAsync(db, 'COMMIT;'); // Confirmar transacción
 

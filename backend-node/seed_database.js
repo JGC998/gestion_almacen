@@ -1,28 +1,27 @@
 // backend-node/seed_database.js
 const sqlite3 = require('sqlite3').verbose();
-const pathModule = require('path'); // Renombrado para evitar conflicto y ser claro
+const path = require('path');
 
-// Ruta correcta a la base de datos
-const dbPath = pathModule.resolve(__dirname, 'almacen', 'almacen.db');
+const dbPath = path.resolve(__dirname, 'almacen', 'almacen.db');
 
-// Conectar a la base de datos usando dbPath
-const db = new sqlite3.Database(dbPath, (err) => { // CORREGIDO: Usar dbPath aquí
-    if (err) {
-        return console.error("Error al conectar a la base de datos para seeder:", err.message);
-    }
-    console.log("Conectado a la base de datos SQLite para seeder.");
-    db.exec('PRAGMA foreign_keys = ON;', (fkErr) => { // Habilitar claves foráneas
-        if (fkErr) console.error("Error al habilitar foreign keys en seeder:", fkErr.message);
+function conectarDB() {
+    const db = new sqlite3.Database(dbPath, (err) => {
+        if (err) {
+            console.error("Error al conectar a la base de datos:", err.message);
+            throw err;
+        }
     });
-});
+    db.exec('PRAGMA foreign_keys = ON;', (err) => {
+        if (err) console.error("Error al habilitar foreign keys:", err.message);
+    });
+    return db;
+}
 
-// Helper para ejecutar db.run como una Promesa
-function runAsync(sql, params = []) {
+function runAsync(db, sql, params = []) {
     return new Promise((resolve, reject) => {
-        // Usar function() en lugar de arrow function para poder usar this.lastID
-        db.run(sql, params, function(err) {
+        db.run(sql, params, function (err) {
             if (err) {
-                console.error('Error ejecutando SQL en seeder:', sql, params, err.message);
+                console.error('Error SQL:', sql, params, err.message);
                 reject(err);
             } else {
                 resolve({ lastID: this.lastID, changes: this.changes });
@@ -31,167 +30,114 @@ function runAsync(sql, params = []) {
     });
 }
 
-// Función principal para sembrar datos
-async function seedData() {
+async function main() {
+    const db = conectarDB();
+    console.log("Conectado a la base de datos para poblar con nueva estructura.");
+
     try {
-        console.log("Iniciando siembra de datos...");
-        await runAsync('BEGIN TRANSACTION;');
+        await runAsync(db, 'BEGIN TRANSACTION;');
 
-        // --- LIMPIAR TABLAS EXISTENTES ---
-        await runAsync('DELETE FROM StockProductosTerminados;');
-        await runAsync('DELETE FROM OrdenesProduccion;');
-        await runAsync('DELETE FROM ProcesosFabricacion;');
-        await runAsync('DELETE FROM Recetas;');
-        await runAsync('DELETE FROM Maquinaria;');
-        await runAsync('DELETE FROM ProductosTerminados;');
-        await runAsync('DELETE FROM StockMateriasPrimas;');
-        await runAsync('DELETE FROM StockComponentes;');
-        await runAsync('DELETE FROM GastosPedido;');
-        await runAsync('DELETE FROM LineasPedido;');
-        await runAsync('DELETE FROM PedidosProveedores;');
-        console.log("Tablas relevantes limpiadas.");
-
-        // --- Pedido 1: Nacional PVC ---
-        let result = await runAsync(
-            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['FAC-N-001', 'PVC Nacional S.L.', '2024-05-01', '2024-05-05', 'NACIONAL', 'Pedido de planchas PVC']
-        );
-        const pedido1Id = result.lastID;
-        await runAsync(
-            `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`,
-            [pedido1Id, 'SUPLIDOS', 'Transporte local', 50.00]
-        );
-        // (El resto de los datos de ejemplo se mantienen igual que en la versión anterior que te di)
-        // ... (StockMateriasPrimas para pedido1Id)
-         await runAsync(
-            `INSERT INTO StockMateriasPrimas (pedido_id, material_tipo, subtipo_material, referencia_stock, fecha_entrada_almacen, status, espesor, ancho, largo_inicial, largo_actual, unidad_medida, coste_unitario_final, color, ubicacion, origen_factura, peso_total_kg)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [pedido1Id, 'PVC', 'Rígido', 'PVC-R-0.5-BL', '2024-05-05', 'DISPONIBLE', '0.5mm', 1000, 100, 100, 'm2', 2.75, 'Blanco', 'Estante A1', 'FAC-N-001', 120.00]
-        );
-        await runAsync(
-            `INSERT INTO StockMateriasPrimas (pedido_id, material_tipo, subtipo_material, referencia_stock, fecha_entrada_almacen, status, espesor, ancho, largo_inicial, largo_actual, unidad_medida, coste_unitario_final, color, ubicacion, origen_factura, peso_total_kg)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [pedido1Id, 'PVC', 'Flexible', 'PVC-F-1.0-TR', '2024-05-05', 'EMPEZADA', '1.0mm', 1200, 50, 30, 'm', 3.80, 'Transparente', 'Estante A2', 'FAC-N-001', 60.00]
-        );
-
-
-        // --- Pedido 2: Importación Goma ---
-        result = await runAsync(
-            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            ['INV-I-777', 'Goma Global Co.', '2024-04-15', '2024-05-20', 'CONTENEDOR', 'Importación EPDM', 0.92]
-        );
-        const pedido2Id = result.lastID;
-        // ... (StockMateriasPrimas para pedido2Id, incluyendo la goma de 6mm)
-        await runAsync(
-            `INSERT INTO StockMateriasPrimas (pedido_id, material_tipo, subtipo_material, referencia_stock, fecha_entrada_almacen, status, espesor, ancho, largo_inicial, largo_actual, unidad_medida, coste_unitario_final, color, ubicacion, origen_factura, peso_total_kg)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [pedido2Id, 'GOMA', 'EPDM', 'GOM-EPDM-3-NE', '2024-05-20', 'DISPONIBLE', '3mm', 1000, 200, 200, 'm', 5.10, 'Negro', 'Zona Goma R1', 'INV-I-777', 250.00]
-        );
-        await runAsync(
-            `INSERT INTO StockMateriasPrimas (pedido_id, material_tipo, subtipo_material, referencia_stock, fecha_entrada_almacen, status, espesor, ancho, largo_inicial, largo_actual, unidad_medida, coste_unitario_final, color, ubicacion, origen_factura, peso_total_kg)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [pedido2Id, 'GOMA', 'EPDM', 'GOM-EPDM-6-NE', '2024-05-20', 'DISPONIBLE', '6mm', 1200, 150, 150, 'm', 7.75, 'Negro', 'Zona Goma R2', 'INV-I-777', 300.00]
-        );
-
-        // --- Pedido 3: Nacional FIELTRO ---
-        result = await runAsync(
-            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['FAC-N-002', 'Fieltros Nacionales', '2024-06-01', '2024-06-03', 'NACIONAL', 'Pedido fieltro adhesivo']
-        );
-        const pedido3Id = result.lastID;
-        // ... (StockMateriasPrimas para pedido3Id)
-        await runAsync(
-            `INSERT INTO StockMateriasPrimas (pedido_id, material_tipo, subtipo_material, referencia_stock, fecha_entrada_almacen, status, espesor, ancho, largo_inicial, largo_actual, unidad_medida, coste_unitario_final, color, ubicacion, origen_factura, peso_total_kg)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [pedido3Id, 'FIELTRO', 'Adhesivo', 'FIE-ADH-F10-GR', '2024-06-03', 'DISPONIBLE', 'F10', 1000, 50, 50, 'm', 1.50, 'Gris', 'Estante B3', 'FAC-N-002', 15.00]
-        );
-
-        // --- Componentes de Ejemplo ---
-        await runAsync(
-            `INSERT INTO StockComponentes (componente_ref, descripcion, cantidad_inicial, cantidad_actual, unidad_medida, coste_unitario_final, fecha_entrada_almacen, status, ubicacion, origen_factura)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ['ADH-001', 'Adhesivo Industrial XZ', 50, 50, 'kg', 12.50, '2024-05-10', 'DISPONIBLE', 'Almacén C1', 'COMP-FAC-001']
-        );
-        console.log("Pedidos y Stock de Materias Primas/Componentes sembrados.");
-
-        // --- Productos Terminados (Plantillas) de Ejemplo ---
-        const pt1Result = await runAsync(
-            `INSERT INTO ProductosTerminados (referencia, nombre, unidad_medida, material_principal, espesor_principal, ancho_final, largo_final, coste_extra_unitario, fecha_creacion, status)
-             VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ['Junta EPDM Circular D20', 'unidad', 'GOMA', '3mm', 0.02, 0.02, 0.05, '2024-06-01', 'ACTIVO']
-        );
-        const prod1_id = pt1Result.lastID;
-        await runAsync(`UPDATE ProductosTerminados SET referencia = ? WHERE id = ?`, [`PT-${String(prod1_id).padStart(5, '0')}`, prod1_id]);
-
-        const pt2Result = await runAsync(
-            `INSERT INTO ProductosTerminados (referencia, nombre, unidad_medida, material_principal, espesor_principal, ancho_final, largo_final, coste_extra_unitario, fecha_creacion, status)
-             VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ['FALDETA ALDAMA 6MM', 'unidad', 'GOMA', '6mm', 0.54, 0.5, 0.10, '2024-06-05', 'ACTIVO']
-        );
-        const prod_faldeta_id = pt2Result.lastID;
-        await runAsync(`UPDATE ProductosTerminados SET referencia = ? WHERE id = ?`, [`PT-${String(prod_faldeta_id).padStart(5, '0')}`, prod_faldeta_id]);
+        // 1. LIMPIAR TODAS LAS TABLAS EN EL ORDEN CORRECTO
+        console.log("Limpiando tablas antiguas...");
+        await runAsync(db, `DELETE FROM Stock;`);
+        await runAsync(db, `DELETE FROM Recetas;`);
+        await runAsync(db, `DELETE FROM GastosPedido;`);
+        await runAsync(db, `DELETE FROM LineasPedido;`);
+        await runAsync(db, `DELETE FROM OrdenesProduccion;`);
+        await runAsync(db, `DELETE FROM ProcesosFabricacion;`);
+        await runAsync(db, `DELETE FROM Items;`);
+        await runAsync(db, `DELETE FROM PedidosProveedores;`);
+        await runAsync(db, `DELETE FROM Maquinaria;`);
         
-        console.log(`Plantillas de Producto de ejemplo creadas.`);
+        console.log("Poblando tablas maestras...");
 
-        // --- Maquinaria de Ejemplo ---
-        const maq1_id = (await runAsync(
-            `INSERT INTO Maquinaria (nombre, descripcion, coste_adquisicion, coste_hora_operacion)
-             VALUES (?, ?, ?, ?)`,
-            ['Cortadora CNC Goma', 'Máquina de corte por control numérico para goma', 50000, 15.00]
-        )).lastID;
-        console.log(`Maquinaria de ejemplo creada.`);
+        // 2. POBLAR TABLA MAESTRA DE ITEMS
+        /**const items = [
+            // Materias Primas - Goma
+            { sku: 'GOM-EPDM-6-1000', desc: 'Goma EPDM 6mm Ancho 1000mm', tipo: 'MATERIA_PRIMA', fam: 'GOMA', esp: '6mm', ancho: 1000, um: 'm' },
+            { sku: 'GOM-EPDM-8-1000', desc: 'Goma EPDM 8mm Ancho 1000mm', tipo: 'MATERIA_PRIMA', fam: 'GOMA', esp: '8mm', ancho: 1000, um: 'm' },
+            { sku: 'GOM-EPDM-10-1000', desc: 'Goma EPDM 10mm Ancho 1000mm', tipo: 'MATERIA_PRIMA', fam: 'GOMA', esp: '10mm', ancho: 1000, um: 'm' },
+            // Materias Primas - Fieltro
+            { sku: 'FIE-ADH-F15-1200', desc: 'Fieltro Adhesivo F15 Ancho 1200mm', tipo: 'MATERIA_PRIMA', fam: 'FIELTRO', esp: 'F15', ancho: 1200, um: 'm' },
+            { sku: 'FIE-ADH-F10-1800', desc: 'Fieltro Adhesivo F10 Ancho 1800mm', tipo: 'MATERIA_PRIMA', fam: 'FIELTRO', esp: 'F10', ancho: 1800, um: 'm' },
+            // Productos Terminados
+            { sku: 'PT-FALD-STD', desc: 'Faldeta Estándar de Goma 6mm', tipo: 'PRODUCTO_TERMINADO', fam: 'FALDETA', esp: '6mm', ancho: 500, um: 'unidad' }
+        ];
 
-        // --- Recetas de Ejemplo ---
-        await runAsync(
-            `INSERT INTO Recetas (producto_terminado_id, material_tipo_generico, espesor_generico, ancho_generico, cantidad_requerida, unidad_medida_requerida, unidades_por_ancho_material, peso_por_unidad_producto, notas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [prod1_id, 'GOMA', '3mm', 0.02, 0.02, 'm', 50, 0.01, 'Consumo de material para junta D20. (ancho_generico es el ancho de la pieza)']
-        );
-        await runAsync(
-            `INSERT INTO Recetas (producto_terminado_id, material_tipo_generico, espesor_generico, ancho_generico, cantidad_requerida, unidad_medida_requerida, unidades_por_ancho_material, peso_por_unidad_producto, notas)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [prod_faldeta_id, 'GOMA', '6mm', 0.54, 0.5, 'm', 1, 1.5, 'Material para 1 faldeta. 0.54m de ancho por 0.5m de largo de la bobina.']
-        );
-        console.log(`Recetas de ejemplo creadas.`);
+        const itemIds = {};
+        for (const item of items) {
+            const res = await runAsync(db, `INSERT INTO Items (sku, descripcion, tipo_item, familia, espesor, ancho, unidad_medida) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [item.sku, item.desc, item.tipo, item.fam, item.esp, item.ancho, item.um]);
+            itemIds[item.sku] = res.lastID;
+        }
+        console.log(`${items.length} artículos insertados en la tabla Items.`);
 
-        // --- Procesos de Fabricación de Ejemplo ---
-        await runAsync(
-            `INSERT INTO ProcesosFabricacion (producto_terminado_id, maquinaria_id, nombre_proceso, tiempo_estimado_horas, aplica_a_clientes)
-             VALUES (?, ?, ?, ?, ?)`,
-            [prod1_id, maq1_id, 'Corte de Junta D20', 0.02, 'ALL']
-        );
-        await runAsync(
-            `INSERT INTO ProcesosFabricacion (producto_terminado_id, maquinaria_id, nombre_proceso, tiempo_estimado_horas, aplica_a_clientes)
-             VALUES (?, ?, ?, ?, ?)`,
-            [prod_faldeta_id, maq1_id, 'Corte Faldeta Aldama', 0.05, 'ALL']
-        );
-        console.log(`Procesos de Fabricación de ejemplo creados.`);
+        // 3. POBLAR PEDIDOS Y STOCK
+        console.log("Poblando pedidos y stock...");
+        const pedido = await runAsync(db, `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo) VALUES (?, ?, ?, ?, ?)`,
+            ['PED-2025-001', 'Proveedor General', '2025-06-01', '2025-06-05', 'NACIONAL']);
+            
+        const stockLotes = [
+            { sku: 'GOM-EPDM-6-1000', lote: 'LOTE-001', cant: 150, coste: 12.50 },
+            { sku: 'GOM-EPDM-8-1000', lote: 'LOTE-002', cant: 180, coste: 16.00 },
+            { sku: 'FIE-ADH-F15-1200', lote: 'LOTE-003', cant: 50, coste: 16.50 },
+            { sku: 'FIE-ADH-F10-1800', lote: 'LOTE-004', cant: 75, coste: 19.80 },
+        ];
 
-        // No insertamos Órdenes de Producción ni StockProductosTerminados aquí, se crearán por la app.
-        // El coste_fabricacion_estandar de ProductosTerminados se calculará/actualizará cuando se modifiquen recetas/procesos en la app.
+        for (const lote of stockLotes) {
+            await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, ubicacion, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [itemIds[lote.sku], lote.lote, lote.cant, lote.cant, lote.coste, 'Pasillo A', pedido.lastID, '2025-06-05']);
+        }
+        console.log(`${stockLotes.length} lotes de stock insertados.`);
 
-        await runAsync('COMMIT;');
-        console.log("Siembra de datos completada exitosamente.");
+        // 4. POBLAR RECETAS
+        console.log("Poblando recetas...");
+        await runAsync(db, `INSERT INTO Recetas (producto_id, material_id, cantidad_requerida) VALUES (?, ?, ?)`,
+            [itemIds['PT-FALD-STD'], itemIds['GOM-EPDM-6-1000'], 0.5]); // 0.5 metros de goma para 1 faldeta
+        console.log("Recetas de ejemplo insertadas.");
+
+        await runAsync(db, 'COMMIT;');
+        console.log("Base de datos poblada con la nueva estructura exitosamente.");**/
+
+        // En backend-node/seed_database.js, dentro de la función seedDatabase
+
+// --- INICIO: Bloque para añadir contenedor de Caramelo ---
+
+        // 1. Crear el nuevo Item de tipo "Caramelo" si no existe
+        console.log("Creando item de Caramelo...");
+        const carameloItem = { sku: 'CARAM-PVC-3-1200', desc: 'PVC Color Caramelo 3mm Ancho 1200mm', tipo: 'MATERIA_PRIMA', fam: 'CARAMELO', esp: '3mm', ancho: 1200, um: 'm' };
+        const resCaramelo = await runAsync(db, `INSERT OR IGNORE INTO Items (sku, descripcion, tipo_item, familia, espesor, ancho, unidad_medida) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [carameloItem.sku, carameloItem.desc, carameloItem.tipo, carameloItem.fam, carameloItem.esp, carameloItem.ancho, carameloItem.um]);
+        const carameloItemId = resCaramelo.lastID || (await getDB(db, `SELECT id FROM Items WHERE sku = ?`, [carameloItem.sku])).id;
+
+
+        // 2. Crear el Pedido de tipo CONTENEDOR y sus gastos asociados
+        console.log("Creando contenedor de importación...");
+        const pedidoContenedor = await runAsync(db, `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, valor_conversion) VALUES (?, ?, ?, ?, ?, ?)`,
+            ['CONT-2025-001', 'Caramelo Corp', '2025-05-20', '2025-06-25', 'CONTENEDOR', 1.08]);
+
+        await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`,
+            [pedidoContenedor.lastID, 'SUPLIDOS', 'Transporte Marítimo', 1200.00]);
+        await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`,
+            [pedidoContenedor.lastID, 'SUJETO', 'Aranceles de importación', 450.00]);
+
+
+        // 3. Crear el lote de Stock para el material Caramelo, asociado al contenedor
+        console.log("Poblando stock del contenedor...");
+        await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, ubicacion, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [carameloItemId, 'LOTE-CARAM-001', 500, 500, 8.75, 'Pasillo B', pedidoContenedor.lastID, '2025-06-25']);
+
+// --- FIN: Bloque para añadir contenedor de Caramelo ---
 
     } catch (error) {
-        console.error("Error durante la siembra de datos, revirtiendo:", error.message, error.stack);
-        try {
-            await runAsync('ROLLBACK;');
-        } catch (rollbackError) {
-            console.error("Error al intentar hacer ROLLBACK:", rollbackError.message);
-        }
+        console.error("Error poblando la base de datos, revirtiendo cambios.", error);
+        await runAsync(db, 'ROLLBACK;');
     } finally {
         db.close((err) => {
-            if (err) {
-                return console.error("Error al cerrar la conexión de la base de datos del seeder:", err.message);
-            }
-            console.log("Conexión a la base de datos del seeder cerrada.");
+            if (err) console.error("Error al cerrar la base de datos.", err.message);
+            else console.log("Conexión a la base de datos cerrada.");
         });
     }
 }
 
-// Ejecutar la función de siembra
-seedData();
+main();

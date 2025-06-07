@@ -149,6 +149,10 @@ function FormularioPedidoImportacion() {
                 <option value="GOMA">GOMA</option>
                 <option value="PVC">PVC</option>
                 <option value="FIELTRO">FIELTRO</option>
+                <option value="FIELTRO">VERDE</option>
+                <option value="FIELTRO">CARAMELO</option>
+
+
               </select>
             </div>
              <div>
@@ -178,7 +182,6 @@ function FormularioPedidoImportacion() {
             <legend>Línea {index + 1}</legend>
             <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))'}}>
               <label>Ref. Stock*: <input type="text" name="referencia_stock" value={linea.referencia_stock} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Subtipo Material: <input type="text" name="subtipo_material" value={linea.subtipo_material} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Espesor: <input type="text" name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Ancho (mm): <input type="number" name="ancho" value={linea.ancho} onChange={(e) => handleLineaChange(index, e)} /></label>
               <label>Color: <input type="text" name="color" value={linea.color} onChange={(e) => handleLineaChange(index, e)} /></label>
