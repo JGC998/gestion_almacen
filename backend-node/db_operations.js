@@ -1084,37 +1084,40 @@ async function consultarProcesoFabricacionPorId(id) {
 async function actualizarProcesoFabricacion(id, updates) {
     const setClauses = [];
     const params = [];
-
+    const camposValidos = [
+        'producto_terminado_id',
+        'maquinaria_id',
+        'nombre_proceso',
+        'tiempo_estimado_horas',
+        'aplica_a_clientes'
+    ];
     for (const key in updates) {
-        if (updates.hasOwnProperty(key) && key !== 'id') {
+        if (camposValidos.includes(key)) {
             setClauses.push(`${key} = ?`);
-            if (key === 'tiempo_estimado_horas') {
-                params.push(parseFloat(updates[key]) || 0);
+            if (['tiempo_estimado_horas', 'producto_terminado_id', 'maquinaria_id'].includes(key)) {
+                params.push(parseFloat(updates[key]) || null);
             } else {
                 params.push(updates[key]);
             }
         }
     }
-
     if (setClauses.length === 0) {
-        throw new Error("No hay campos para actualizar.");
+        console.warn("actualizarProcesoFabricacion: No se proporcionaron campos válidos para actualizar.");
+        return 0;
     }
-
     params.push(id);
-    const sql = `UPDATE ProcesosFabricacion SET ${setClauses.join(', ')} WHERE id = ?`;
+    const query = `UPDATE ProcesosFabricacion SET ${setClauses.join(', ')} WHERE id = ?`;
     try {
-        const result = await runDB(sql, params);
-        if (result.changes === 0) {
-            throw new Error(`No se encontró Proceso de Fabricación con ID ${id} para actualizar.`);
-        }
+        const result = await runDB(query, params);
         return result.changes;
-    } catch (error) {
-        if (error.message.includes("FOREIGN KEY constraint failed")) {
+    } catch (err) {
+        if (err.message.toUpperCase().includes("FOREIGN KEY CONSTRAINT FAILED")) {
             throw new Error(`Producto terminado o maquinaria no válida.`);
         }
-        throw error;
+        throw err;
     }
 }
+
 
 async function eliminarProcesoFabricacion(id) {
     const sql = `DELETE FROM ProcesosFabricacion WHERE id = ?`;
@@ -1347,96 +1350,80 @@ async function eliminarStockProductoTerminado(id) {
 
 // ... (insertarProductoTerminado y actualizarReferenciaProductoTerminado ya deberían aceptar dbInstance)
 
-async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) {
-    if (materialGenerico.material_tipo_generico) {
+async function obtenerUltimoCosteMaterialGenerico(receta) {
+    // CORREGIDO: La búsqueda de materia prima ahora es más flexible.
+    // Solo busca por tipo y espesor, que son las características clave del material base.
+    // Ya no filtra por ancho, subtipo o color de la receta, permitiendo encontrar la bobina correcta.
+    if (receta.material_tipo_generico) {
         const sql = `
-            SELECT coste_unitario_final, ancho AS ancho_bobina_mm
-            FROM StockMateriasPrimas
-            WHERE material_tipo = ?
-              AND (subtipo_material = ? OR (subtipo_material IS NULL AND ? IS NULL))
-              AND (espesor = ? OR (espesor IS NULL AND ? IS NULL))
-              AND (ancho = ? OR (ancho IS NULL AND ? IS NULL))
-              AND (color = ? OR (color IS NULL AND ? IS NULL))
-            ORDER BY fecha_entrada_almacen DESC, id DESC
-            LIMIT 1
-        `;
-        const params = [
-            materialGenerico.material_tipo_generico,
-            materialGenerico.subtipo_material_generico, materialGenerico.subtipo_material_generico,
-            materialGenerico.espesor_generico, materialGenerico.espesor_generico,
-            materialGenerico.ancho_generico, materialGenerico.ancho_generico, // Este es el ancho_generico de la receta
-            materialGenerico.color_generico, materialGenerico.color_generico
-        ];
-        // Asegúrate de que `ancho` en StockMateriasPrimas es el que necesitas aquí para el cálculo de m2.
-        // Si el `ancho_generico` de la receta es el relevante para el cálculo de coste, la query es más compleja
-        // o el `ancho_generico` debe coincidir con el `ancho` de la bobina.
-        // Por ahora, asumimos que la query busca una bobina compatible en general.
-        const row = await getAsync(dbInstance, sql, params); // Usa getAsync
-        return row; // Devolver la fila completa para tener coste y ancho_bobina_mm
-    } else if (materialGenerico.componente_ref_generico) {
+            SELECT coste_unitario_final, ancho AS ancho_bobina_mm 
+            FROM StockMateriasPrimas 
+            WHERE material_tipo = ? AND espesor = ? 
+            ORDER BY fecha_entrada_almacen DESC, id DESC 
+            LIMIT 1`;
+        return await getDB(sql, [receta.material_tipo_generico, receta.espesor_generico]);
+    } 
+    // La búsqueda de componentes se mantiene igual.
+    else if (receta.componente_ref_generico) {
         const sql = `
-            SELECT coste_unitario_final, null AS ancho_bobina_mm /* Componentes no tienen ancho de bobina */
-            FROM StockComponentes
-            WHERE componente_ref = ?
-            ORDER BY fecha_entrada_almacen DESC, id DESC
-            LIMIT 1
-        `;
-        const row = await getAsync(dbInstance, sql, [materialGenerico.componente_ref_generico]); // Usa getAsync
-        return row;
+            SELECT coste_unitario_final, null AS ancho_bobina_mm 
+            FROM StockComponentes 
+            WHERE componente_ref = ? 
+            ORDER BY fecha_entrada_almacen DESC, id DESC 
+            LIMIT 1`;
+        return await getDB(sql, [receta.componente_ref_generico]);
     }
     return null;
 }
 
-async function calcularCosteMateriales(dbInstance, productoTerminadoId, configuraciones, productoAnchoFinalM, productoLargoFinalM) {
-    const recetas = await allAsync(dbInstance, `
-        SELECT r.cantidad_requerida, r.unidades_por_ancho_material,
-               r.material_tipo_generico, r.subtipo_material_generico, r.espesor_generico, 
-               r.ancho_generico AS ancho_generico_receta, r.color_generico, /* ancho_generico_receta puede ser para verificar compatibilidad */
-               r.componente_ref_generico
-        FROM Recetas r
-        WHERE r.producto_terminado_id = ?
-    `, [productoTerminadoId]);
+
+
+async function calcularCosteMateriales(productoTerminadoId, productoAnchoFinalM, productoLargoFinalM) {
+    const recetas = await allDB(
+        `SELECT * FROM Recetas WHERE producto_terminado_id = ?`,
+        [productoTerminadoId]
+    );
 
     let costeTotalMateriales = 0;
     for (const receta of recetas) {
         const cantidadRequerida = parseFloat(receta.cantidad_requerida) || 0;
-        const materiaPrimaInfo = await obtenerUltimoCosteMaterialGenerico(dbInstance, receta); // Pasa dbInstance
-
+        const materiaPrimaInfo = await obtenerUltimoCosteMaterialGenerico(receta);
+        
         if (materiaPrimaInfo && materiaPrimaInfo.coste_unitario_final !== null) {
             let costeMaterialParaEstaReceta = 0;
-            const costeUnitarioBobina = parseFloat(materiaPrimaInfo.coste_unitario_final);
+            const costeUnitario = parseFloat(materiaPrimaInfo.coste_unitario_final);
 
-            if (receta.material_tipo_generico) { // Es materia prima (bobina)
+            if (receta.material_tipo_generico) { // Es una bobina de materia prima
                 const anchoBobinaMM = parseFloat(materiaPrimaInfo.ancho_bobina_mm);
                 if (anchoBobinaMM > 0) {
                     const anchoBobinaM = anchoBobinaMM / 1000.0;
-                    const costePorM2MateriaPrima = costeUnitarioBobina / anchoBobinaM;
-                    // Usamos ancho_final y largo_final del producto que se pasó a actualizarCosteFabricacionEstandar
-                    const areaProductoM2 = productoAnchoFinalM * productoLargoFinalM;
-                    costeMaterialParaEstaReceta = costePorM2MateriaPrima * areaProductoM2 * cantidadRequerida; // Si cantidad_requerida es "cuántas veces esta pieza"
-                                                                                                    // o si cantidad_requerida ya es el área/longitud, ajustar
+                    const costePorM2MateriaPrima = costeUnitario / anchoBobinaM;
+                    // Usa las dimensiones reales de la plantilla de producto para calcular el área
+                    const areaProductoM2 = (parseFloat(productoAnchoFinalM) || 0) * (parseFloat(productoLargoFinalM) || 0);
+                    // El coste es el área de la pieza por el coste/m2, multiplicado por las veces que se usa esa pieza.
+                    costeMaterialParaEstaReceta = costePorM2MateriaPrima * areaProductoM2 * cantidadRequerida;
                 } else {
-                     console.warn(`Ancho de bobina 0 o nulo para receta de PT ID ${productoTerminadoId}`);
+                    console.warn(`Ancho de bobina es 0 o nulo para la materia prima encontrada para la receta del producto ID ${productoTerminadoId}. Coste de este material será 0.`);
                 }
-            } else if (receta.componente_ref_generico) { // Es componente
-                costeMaterialParaEstaReceta = costeUnitarioBobina * cantidadRequerida;
+            } else if (receta.componente_ref_generico) { // Es un componente
+                costeMaterialParaEstaReceta = costeUnitario * cantidadRequerida;
             }
             costeTotalMateriales += costeMaterialParaEstaReceta;
         } else {
-            console.warn(`No se encontró coste para material genérico de receta para PT ID ${productoTerminadoId}. Material: ${receta.material_tipo_generico || receta.componente_ref_generico}`);
+             console.warn(`No se encontró coste en stock para el material de la receta del producto ID ${productoTerminadoId}. Material: ${receta.material_tipo_generico || receta.componente_ref_generico}`);
         }
     }
     return costeTotalMateriales;
 }
 
-async function calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones) {
-    const procesos = await allAsync(dbInstance, `
-        SELECT pf.tiempo_estimado_horas, m.coste_hora_operacion
-        FROM ProcesosFabricacion pf
-        JOIN Maquinaria m ON pf.maquinaria_id = m.id
-        WHERE pf.producto_terminado_id = ?
-    `, [productoTerminadoId]); // Usa allAsync
 
+async function calcularCosteProcesos(productoTerminadoId, configuraciones) {
+    const procesos = await allDB(
+        `SELECT pf.tiempo_estimado_horas, m.coste_hora_operacion
+         FROM ProcesosFabricacion pf JOIN Maquinaria m ON pf.maquinaria_id = m.id
+         WHERE pf.producto_terminado_id = ?`,
+        [productoTerminadoId]
+    );
     const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0);
     let costeTotalProcesos = 0;
     for (const proceso of procesos) {
@@ -1448,44 +1435,43 @@ async function calcularCosteProcesos(dbInstance, productoTerminadoId, configurac
 }
 
 // Ajustar actualizarCosteFabricacionEstandar para obtener ancho_final y largo_final del producto
-async function actualizarCosteFabricacionEstandar(dbInstance, productoTerminadoId, configuraciones) {
+async function actualizarCosteFabricacionEstandar(productoTerminadoId, configuraciones) {
+    // Esta función ahora es autónoma y no necesita recibir una instancia de BD
     try {
-        const producto = await getAsync(dbInstance, 
+        const producto = await getDB(
             `SELECT coste_extra_unitario, ancho_final, largo_final 
-             FROM ProductosTerminados WHERE id = ?`, 
+             FROM ProductosTerminados WHERE id = ?`,
             [productoTerminadoId]
         );
+
         if (!producto) {
-            throw new Error(`Producto terminado con ID ${productoTerminadoId} no encontrado para calcular coste estándar.`);
+            throw new Error(`Producto terminado con ID ${productoTerminadoId} no encontrado para calcular coste.`);
         }
+        
         const costeExtra = parseFloat(producto.coste_extra_unitario) || 0;
-        const productoAnchoFinalM = parseFloat(producto.ancho_final) || 0;
-        const productoLargoFinalM = parseFloat(producto.largo_final) || 0;
+        
+        const costeMateriales = await calcularCosteMateriales(productoTerminadoId, producto.ancho_final, producto.largo_final);
+        const costeProcesos = await calcularCosteProcesos(productoTerminadoId, configuraciones);
+        
+        let costeTotal = costeMateriales + costeProcesos + costeExtra;
 
-        // Asegurarse de que ancho y largo sean válidos para el cálculo de materiales
-        if (productoAnchoFinalM <= 0 || productoLargoFinalM <= 0) {
-            console.warn(`Producto ID ${productoTerminadoId} tiene dimensiones no válidas (ancho: ${productoAnchoFinalM}, largo: ${productoLargoFinalM}) para cálculo de coste de material. El coste de material será 0.`);
-             // No se puede calcular el coste de materiales si las dimensiones no son válidas
-            const costeMateriales = 0; // O manejar como error
-            const costeProcesos = await calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones);
-            const costeTotal = costeMateriales + costeProcesos + costeExtra;
-            await runAsync(dbInstance, `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, [costeTotal.toFixed(4), productoTerminadoId]);
-            console.log(`Coste de fabricación estándar (con material=0 por dimensiones no válidas) para producto ${productoTerminadoId} actualizado a ${costeTotal.toFixed(4)}`);
-            return parseFloat(costeTotal.toFixed(4));
-
+        // CORREGIDO: Asegurarse de que nunca se guarde NaN
+        if (isNaN(costeTotal)) {
+            console.error(`Cálculo de coste resultó en NaN para producto ID ${productoTerminadoId}. Se guardará como 0.`);
+            costeTotal = 0;
         }
 
-
-        const costeMateriales = await calcularCosteMateriales(dbInstance, productoTerminadoId, configuraciones, productoAnchoFinalM, productoLargoFinalM);
-        const costeProcesos = await calcularCosteProcesos(dbInstance, productoTerminadoId, configuraciones);
-        const costeTotal = costeMateriales + costeProcesos + costeExtra;
-
-        await runAsync(dbInstance, `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, [costeTotal.toFixed(4), productoTerminadoId]);
+        await runDB(
+            `UPDATE ProductosTerminados SET coste_fabricacion_estandar = ? WHERE id = ?`, 
+            [costeTotal.toFixed(4), productoTerminadoId]
+        );
+        
         console.log(`Coste de fabricación estándar para producto ${productoTerminadoId} actualizado a ${costeTotal.toFixed(4)}`);
         return parseFloat(costeTotal.toFixed(4));
+
     } catch (error) {
         console.error(`Error al actualizar coste de fabricación estándar para producto ${productoTerminadoId}:`, error.message, error.stack);
-        throw error;
+        throw error; // Relanza el error para que el endpoint que lo llamó lo capture
     }
 }
 
@@ -1496,32 +1482,38 @@ async function actualizarCosteFabricacionEstandar(dbInstance, productoTerminadoI
  * @param {number} productoTerminadoId - ID del producto terminado.
  * @returns {Promise<number>} Coste total de materiales.
  */
-async function calcularCosteMateriales(dbInstance, productoTerminadoId) {
-    const recetas = await allAsync(dbInstance, `
-        SELECT r.cantidad_requerida, r.unidades_por_ancho_material,
-               r.material_tipo_generico, r.subtipo_material_generico, r.espesor_generico, r.ancho_generico, r.color_generico,
-               r.componente_ref_generico
-        FROM Recetas r
-        WHERE r.producto_terminado_id = ?
-    `, [productoTerminadoId]);
+async function calcularCosteMateriales(productoTerminadoId, productoAnchoFinalM, productoLargoFinalM) {
+    // La función interna `obtenerUltimoCosteMaterialGenerico` ahora usa `getDB` que maneja su conexión.
+    const recetas = await allDB(`
+        SELECT r.cantidad_requerida, r.unidades_por_ancho_material, r.material_tipo_generico,
+               r.subtipo_material_generico, r.espesor_generico, r.ancho_generico AS ancho_generico_receta, 
+               r.color_generico, r.componente_ref_generico
+        FROM Recetas r WHERE r.producto_terminado_id = ?`, 
+        [productoTerminadoId]
+    );
 
     let costeTotalMateriales = 0;
     for (const receta of recetas) {
         const cantidadRequerida = parseFloat(receta.cantidad_requerida) || 0;
-        const unidadesPorAncho = parseFloat(receta.unidades_por_ancho_material) || 1;
-
-        const costeUnitarioGenerico = await obtenerUltimoCosteMaterialGenerico(dbInstance, receta);
+        const materiaPrimaInfo = await obtenerUltimoCosteMaterialGenerico(receta); // Ya no necesita dbInstance
         
-        let costeMaterialPorUnidadPT = costeUnitarioGenerico;
-        if (receta.material_tipo_generico) { // Si es materia prima (bobina), aplicar aprovechamiento de ancho
-            // Si el coste unitario es por metro lineal y la receta requiere un ancho, ajustar.
-            // Esto es una simplificación. La lógica real depende de cómo se almacena el coste unitario.
-            // Si coste_unitario_final es por metro cuadrado, entonces:
-            // costeMaterialPorUnidadPT = costeUnitarioGenerico * (receta.ancho_generico || 1);
-            // Si es por metro lineal y el producto consume un ancho específico:
-            costeMaterialPorUnidadPT = (costeUnitarioGenerico / unidadesPorAncho); // Coste por unidad de producto terminado
+        if (materiaPrimaInfo && materiaPrimaInfo.coste_unitario_final !== null) {
+            let costeMaterialParaEstaReceta = 0;
+            const costeUnitario = parseFloat(materiaPrimaInfo.coste_unitario_final);
+
+            if (receta.material_tipo_generico) {
+                const anchoBobinaMM = parseFloat(materiaPrimaInfo.ancho_bobina_mm);
+                if (anchoBobinaMM > 0) {
+                    const anchoBobinaM = anchoBobinaMM / 1000.0;
+                    const costePorM2MateriaPrima = costeUnitario / anchoBobinaM;
+                    const areaProductoM2 = (parseFloat(productoAnchoFinalM) || 0) * (parseFloat(productoLargoFinalM) || 0);
+                    costeMaterialParaEstaReceta = costePorM2MateriaPrima * areaProductoM2 * cantidadRequerida;
+                }
+            } else if (receta.componente_ref_generico) {
+                costeMaterialParaEstaReceta = costeUnitario * cantidadRequerida;
+            }
+            costeTotalMateriales += costeMaterialParaEstaReceta;
         }
-        costeTotalMateriales += cantidadRequerida * costeMaterialPorUnidadPT;
     }
     return costeTotalMateriales;
 }

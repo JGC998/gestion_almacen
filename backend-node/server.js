@@ -1126,22 +1126,33 @@ app.put('/api/procesos-fabricacion/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const updates = req.body;
     console.log('Node.js: PUT /api/procesos-fabricacion/:id', id, updates);
+
     if (isNaN(id) || Object.keys(updates).length === 0) {
-        return res.status(400).json({ error: "ID de proceso de fabricación no válido o no se proporcionaron datos para actualizar." });
+        return res.status(400).json({ error: "ID de proceso no válido o no se proporcionaron datos para actualizar." });
     }
+
     try {
-        const changes = await actualizarProcesoFabricacion(id, updates);
-        if (updates.producto_terminado_id) {
-            await actualizarCosteFabricacionEstandar(updates.producto_terminado_id, appConfig);
-        } else if (changes > 0) {
-            const procesoOriginal = await consultarProcesoFabricacionPorId(id);
-            if (procesoOriginal && procesoOriginal.producto_terminado_id) {
-                await actualizarCosteFabricacionEstandar(procesoOriginal.producto_terminado_id, appConfig);
-            }
+        // Obtenemos la información del proceso ANTES de actualizar, para saber el producto_terminado_id
+        const procesoOriginal = await consultarProcesoFabricacionPorId(id);
+        if (!procesoOriginal) {
+            return res.status(404).json({ error: "Proceso de fabricación no encontrado para actualizar." });
         }
-        res.json({ mensaje: `Proceso de fabricación ID ${id} actualizado con éxito.` });
+
+        const changes = await actualizarProcesoFabricacion(id, updates);
+        
+        // Después de actualizar el proceso, recalculamos el coste del producto asociado
+        // La función ahora maneja su propia conexión a la BD, por lo que no necesita `dbInstance`
+        await actualizarCosteFabricacionEstandar(procesoOriginal.producto_terminado_id, appConfig);
+        
+        // Si el ID del producto también se cambió, actualizamos también el coste del nuevo producto asociado
+        if (updates.producto_terminado_id && updates.producto_terminado_id !== procesoOriginal.producto_terminado_id) {
+             await actualizarCosteFabricacionEstandar(updates.producto_terminado_id, appConfig);
+        }
+
+        res.json({ mensaje: `Proceso de fabricación ID ${id} actualizado y coste de producto recalculado.` });
+
     } catch (error) {
-        console.error("Error en PUT /api/procesos-fabricacion/:id:", error.message);
+        console.error(`Error en PUT /api/procesos-fabricacion/:id:`, error.message, error.stack);
         res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
     }
 });
@@ -1149,25 +1160,33 @@ app.put('/api/procesos-fabricacion/:id', async (req, res) => {
 app.delete('/api/procesos-fabricacion/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     console.log('Node.js: DELETE /api/procesos-fabricacion/:id', id);
+
     if (isNaN(id)) {
         return res.status(400).json({ error: "ID de proceso de fabricación no válido." });
     }
+
     try {
+        // Obtenemos la información del proceso ANTES de eliminar, para saber el producto_terminado_id
         const proceso = await consultarProcesoFabricacionPorId(id);
+        if (!proceso) {
+             return res.status(404).json({ error: "Proceso de fabricación no encontrado para eliminar." });
+        }
+        
         const changes = await eliminarProcesoFabricacion(id);
+        
         if (changes > 0) {
-            if (proceso && proceso.producto_terminado_id) {
-                await actualizarCosteFabricacionEstandar(proceso.producto_terminado_id, appConfig);
-            }
-            res.json({ mensaje: `Proceso de fabricación ID ${id} eliminado con éxito.` });
+            // Después de eliminar el proceso, recalculamos el coste del producto que estaba asociado
+            await actualizarCosteFabricacionEstandar(proceso.producto_terminado_id, appConfig);
+            res.json({ mensaje: `Proceso de fabricación ID ${id} eliminado y coste de producto recalculado.` });
         } else {
-            res.status(404).json({ error: "Proceso de fabricación no encontrado para eliminar." });
+             res.status(404).json({ error: "Proceso de fabricación no encontrado para eliminar (changes=0)." });
         }
     } catch (error) {
-        console.error("Error en DELETE /api/procesos-fabricacion/:id:", error.message);
+        console.error(`Error en DELETE /api/procesos-fabricacion/:id:`, error.message, error.stack);
         res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
     }
 });
+
 
 // --- OrdenesProduccion (Endpoint de procesamiento afectado por la nueva lógica de stock) ---
 app.post('/api/ordenes-produccion', async (req, res) => {
