@@ -128,7 +128,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
                       <th>Color</th>
                       <th>Largo Inicial</th>
                       <th>Largo Actual</th>
-                      <th>Coste Unit.</th>
+                      <th>Precio m. lineal</th>
                       <th>Estado</th>
                     </tr>
                   </thead>
@@ -143,7 +143,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
                         <td>{item.color || '-'}</td>
                         <td>{parseFloat(item.largo_inicial).toFixed(2)} {item.unidad_medida}</td>
                         <td>{parseFloat(item.largo_actual).toFixed(2)} {item.unidad_medida}</td>
-                        <td>{parseFloat(item.coste_unitario_final).toFixed(4)} €</td>
+                        <td>{parseFloat(item.coste_unitario_final).toFixed(4)} €/m</td>
                         <td>{item.status}</td>
                       </tr>
                     ))}

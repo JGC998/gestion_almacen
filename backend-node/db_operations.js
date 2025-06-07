@@ -142,10 +142,12 @@ function getAsync(dbInstance, sql, params = []) {
 
 // --- FUNCIONES EXISTENTES (Mantenidas o ligeramente modificadas) ---
 
-async function consultarStockMateriasPrimas(filtros = null) {
+// En backend-node/db_operations.js
+
+async function consultarStockMateriasPrimas(filtros = {}) {
     let sql = `SELECT * FROM StockMateriasPrimas`;
     const params = [];
-    const whereClauses = [];
+    let whereClauses = [];
 
     if (filtros) {
         if (filtros.material_tipo) {
@@ -153,8 +155,13 @@ async function consultarStockMateriasPrimas(filtros = null) {
             params.push(filtros.material_tipo.toUpperCase());
         }
         if (filtros.status) {
-            whereClauses.push(`status = ?`);
-            params.push(filtros.status.toUpperCase());
+            // MODIFICACIÓN: Permite buscar por múltiples estados, ej: "DISPONIBLE,EMPEZADA"
+            const statusArray = filtros.status.split(',').map(s => s.trim().toUpperCase());
+            if (statusArray.length > 0) {
+                const placeholders = statusArray.map(() => '?').join(',');
+                whereClauses.push(`status IN (${placeholders})`);
+                params.push(...statusArray);
+            }
         }
         if (filtros.buscar && filtros.buscar.trim() !== '') {
             const terminoBusqueda = `%${filtros.buscar.trim().toUpperCase()}%`;
@@ -167,10 +174,11 @@ async function consultarStockMateriasPrimas(filtros = null) {
         sql += ` WHERE ${whereClauses.join(' AND ')}`;
     }
     
-    sql += ` ORDER BY fecha_entrada_almacen DESC`;
+    sql += ` ORDER BY material_tipo, espesor, ancho, fecha_entrada_almacen DESC`;
 
     return await allDB(sql, params);
 }
+
 
 // NUEVA FUNCIÓN: Consultar StockComponentes
 async function consultarStockComponentes(filtros = {}) {
@@ -316,7 +324,7 @@ async function actualizarStockItemExistente(dbInstance, idStockItem, datosActual
 
 async function procesarNuevoPedido(datosCompletosPedido) {
     const { pedido, lineas, gastos, material_tipo_general } = datosCompletosPedido;
-    const db = conectarDB(); // Conexión para la transacción
+    const db = conectarDB();
 
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
@@ -328,7 +336,9 @@ async function procesarNuevoPedido(datosCompletosPedido) {
         }
 
         for (const linea of lineas) {
-            // Ahora se busca solo por referencia_stock, que es UNIQUE
+            // ----- ESTA ES LA LÍNEA CLAVE QUE SE AÑADE -----
+            await insertarLineaPedido(db, { ...linea, pedido_id: pedidoId });
+
             const itemExistente = await buscarStockItemExistente(db, linea.referencia_stock);
 
             if (itemExistente) {
@@ -375,7 +385,7 @@ async function procesarNuevoPedido(datosCompletosPedido) {
         await runAsync(db, 'ROLLBACK;');
         throw error;
     } finally {
-        db.close(); // Cerrar la conexión al finalizar la transacción
+        db.close();
     }
 }
 
@@ -436,6 +446,8 @@ async function consultarLineasPedidoPorPedidoId(dbInstance, pedidoId) {
     return allAsync(dbInstance, `SELECT cantidad_original, precio_unitario_original, moneda_original FROM LineasPedido WHERE pedido_id = ?`, [pedidoId]);
 }
 
+// En backend-node/db_operations.js
+
 async function obtenerDetallesCompletosPedido(pedidoId) {
     const db = conectarDB(); // Conexión para la transacción
     try {
@@ -473,15 +485,16 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
             costeTotalPedidoSinGastosEnMonedaOriginal += (cantidad * precioUnitarioEur);
         });
 
+        // --- INICIO DE LA CORRECCIÓN ---
         let totalGastosRepercutibles = 0;
         gastos.forEach(gasto => {
-            // Solo incluir gastos SUPLIDOS que NO contengan la palabra "IVA" en la descripción
-            if (gasto.tipo_gasto && gasto.tipo_gasto.toUpperCase() === 'SUPLIDOS' &&
-                gasto.descripcion && !gasto.descripcion.toUpperCase().includes('IVA')) {
+            const tipoGastoUpper = gasto.tipo_gasto?.toUpperCase();
+            // Aplicamos la misma lógica que en la otra función
+            if ( (tipoGastoUpper === 'SUPLIDOS' && !(gasto.descripcion?.toUpperCase().includes('IVA'))) || tipoGastoUpper === 'NACIONAL' ) {
                 totalGastosRepercutibles += (parseFloat(gasto.coste_eur) || 0);
             }
-            // Si hay otros tipos de gasto que también deben repercutirse, se añadiría aquí
         });
+        // --- FIN DE LA CORRECCIÓN ---
 
         const porcentajeGastos = costeTotalPedidoSinGastosEnMonedaOriginal > 0
             ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnMonedaOriginal
@@ -497,8 +510,27 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
         console.error(`Error obteniendo detalles completos del pedido ${pedidoId}:`, error.message, error.stack);
         throw error;
     } finally {
-        db.close(); // Cerrar la conexión al finalizar la transacción
+        db.close();
     }
+}
+
+// En backend-node/db_operations.js - AÑADE ESTA NUEVA FUNCIÓN
+
+async function insertarLineaPedido(dbInstance, lineaData) {
+    const sql = `INSERT INTO LineasPedido (
+        pedido_id, descripcion_original, cantidad_original,
+        unidad_original, precio_unitario_original, moneda_original
+    ) VALUES (?, ?, ?, ?, ?, ?)`;
+    const params = [
+        lineaData.pedido_id,
+        lineaData.referencia_stock, // Usamos la referencia como descripción
+        lineaData.cantidad_original,
+        lineaData.unidad_medida,
+        lineaData.precio_unitario_original,
+        lineaData.moneda_original
+    ];
+    const result = await runAsync(dbInstance, sql, params);
+    return result.lastID;
 }
 
 async function actualizarEstadoStockItem(stockItemId, nuevoEstado) {

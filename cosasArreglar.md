@@ -1,6 +1,5 @@
 Cosas a arreglar:
-1.Repercusión del gastos de un pedido sobre los materiales, no se calcula el porcentaje
-2.No se ve la tarifa de venta
+
 3.No se calcula el coste estandar de los productos, probablemente porque no encuentra el material buscado en la tarifa
 4.Eliminar el coste de adquisición de la maquinaria
 5.EN los procesos, vamos a calcular lo que se tarda en segundos o quizá en minutos, por ejemplo, yo tardo 30 segundos en realizar una faldeta de goma de 6mm de aldama en la prensa hidraulica, y luego tardo unos 20 segundos en grabarlo en laser, entonces tambien debe de dejarme ponerle en el proceso varias maquinas, ya que pueden intervenir varias, y poder poner sus tiempos correspondientes

@@ -473,7 +473,7 @@ app.get('/api/pedidos/:pedidoId/detalles', async (req, res) => {
     }
 });
 
-// Lógica de cálculo de costes de línea (se mantiene igual, no impactada por receta genérica)
+// En backend-node/server.js - Pega esta función completa
 function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
     let costeTotalPedidoSinGastosEnMonedaOriginal = 0;
 
@@ -497,9 +497,8 @@ function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
 
     let totalGastosRepercutibles = 0;
     gastosItems.forEach(gasto => {
-        // Solo incluir gastos SUPLIDOS que NO contengan la palabra "IVA" en la descripción
-        if (gasto.tipo_gasto && gasto.tipo_gasto.toUpperCase() === 'SUPLIDOS' &&
-            gasto.descripcion && !gasto.descripcion.toUpperCase().includes('IVA')) {
+        const tipoGastoUpper = gasto.tipo_gasto?.toUpperCase();
+        if ( (tipoGastoUpper === 'SUPLIDOS' && !(gasto.descripcion?.toUpperCase().includes('IVA'))) || tipoGastoUpper === 'NACIONAL' ) {
             totalGastosRepercutibles += (parseFloat(gasto.coste_eur) || 0);
         }
     });
@@ -508,11 +507,15 @@ function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
         ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnMonedaOriginal
         : 0;
 
+    console.log(`DEBUG -> Coste Total Base: ${costeTotalPedidoSinGastosEnMonedaOriginal}, Gastos Repercutibles: ${totalGastosRepercutibles}, Porcentaje: ${porcentajeGastosRepercutibles}`);
+
     return lineasConPrecioBase.map(linea => {
         const costeUnitarioFinalCalculado = linea.precio_unitario_eur * (1 + porcentajeGastosRepercutibles);
         return { ...linea, coste_unitario_final_calculado: costeUnitarioFinalCalculado };
     });
 }
+
+
 
 
 app.post('/api/pedidos-nacionales', async (req, res) => {
@@ -659,67 +662,59 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
 
 
 // MODIFICADA: Endpoint /api/tarifa-venta para usar ProductosTerminados
+// En backend-node/server.js
+
 app.get('/api/tarifa-venta', async (req, res) => {
     const { tipo_tarifa } = req.query;
 
-    console.log(`Node.js: Se ha solicitado GET /api/tarifa-venta para tipo_tarifa: ${tipo_tarifa}`);
+    console.log(`Node.js: GET /api/tarifa-venta para MATERIALES EN STOCK, tipo: ${tipo_tarifa}`);
 
     if (!tipo_tarifa) {
         return res.status(400).json({ error: "El parámetro 'tipo_tarifa' es requerido." });
     }
     const tipoTarifaNormalizado = tipo_tarifa.toLowerCase();
-
     const tiposTarifaValidos = ['final', 'fabricante', 'metrajes', 'intermediario'];
     if (!tiposTarifaValidos.includes(tipoTarifaNormalizado)) {
-        return res.status(400).json({ error: `Valor de 'tipo_tarifa' no válido. Valores permitidos: ${tiposTarifaValidos.join(', ')}.` });
+        return res.status(400).json({ error: `Valor de 'tipo_tarifa' no válido.` });
     }
 
     try {
         const configuraciones = appConfig;
-        // Obtener todos los productos terminados activos
-        const productosTerminados = await consultarProductosTerminados({ status: 'ACTIVO' });
+        const claveMargen = `margen_default_${tipoTarifaNormalizado}`;
+        let margenAplicado = configuraciones[claveMargen];
 
-        if (productosTerminados.length === 0) {
+        if (margenAplicado === undefined || isNaN(parseFloat(margenAplicado))) {
+            margenAplicado = 0;
+        }
+        margenAplicado = parseFloat(margenAplicado);
+
+        const stockItems = await consultarStockMateriasPrimas({ status: 'DISPONIBLE,EMPEZADA' });
+
+        if (stockItems.length === 0) {
             return res.json([]);
         }
 
-        const tarifaVenta = [];
-        for (const producto of productosTerminados) {
-            const claveMargen = `margen_default_${tipoTarifaNormalizado}`;
-            let margenAplicado = configuraciones[claveMargen];
-
-            if (margenAplicado === undefined) {
-                console.warn(`Margen no encontrado para la clave '${claveMargen}'. Usando 0.`);
-                margenAplicado = 0;
-            }
-
-            margenAplicado = parseFloat(margenAplicado);
-            if (isNaN(margenAplicado)) {
-                console.warn(`Margen para '${claveMargen}' no es numérico ('${configuraciones[claveMargen]}'). Usando 0.`);
-                margenAplicado = 0;
-            }
-
-            let costeBase = parseFloat(producto.coste_fabricacion_estandar || 0);
-            let costeAdicionalMetraje = 0;
-            
+        const tarifaVentaMateriales = stockItems.map(item => {
+            const costeBase = parseFloat(item.coste_unitario_final) || 0;
             const precioVenta = costeBase * (1 + margenAplicado);
 
-            tarifaVenta.push({
-                producto_referencia: producto.referencia,
-                producto_nombre: producto.nombre,
-                unidad_medida: producto.unidad_medida,
-                coste_base_fabricacion: parseFloat(costeBase.toFixed(4)),
-                margen_aplicado: parseFloat(margenAplicado.toFixed(4)),
-                precio_venta_aplicado_margen: parseFloat(precioVenta.toFixed(4))
-            });
-        }
+            return {
+                id: item.id,
+                referencia_stock: item.referencia_stock,
+                descripcion: `${item.material_tipo} ${item.espesor || ''} ${item.subtipo_material || ''} ${item.ancho || ''}mm ${item.color || ''}`.trim().replace(/\s+/g, ' '),
+                unidad_medida: item.unidad_medida,
+                coste_metro_lineal: costeBase,
+                margen_aplicado: margenAplicado,
+                precio_venta_metro_lineal: precioVenta
+            };
+        });
 
-        console.log(`Tarifa de venta de Productos Terminados generada para tipo_tarifa: ${tipoTarifaNormalizado}`);
-        res.json(tarifaVenta);
+        console.log(`Tarifa de venta de MATERIALES generada para tipo_tarifa: ${tipoTarifaNormalizado}`);
+        res.json(tarifaVentaMateriales);
 
     } catch (error) {
-        console.error("Error en el endpoint /api/tarifa-venta:", error.message, error.stack);
-        res.status(500).json({ error: "Error interno del servidor al generar la tarifa de venta.", detalle: error.message });
+        console.error("Error en /api/tarifa-venta (materiales):", error.message);
+        res.status(500).json({ error: "Error interno al generar la tarifa de venta de materiales.", detalle: error.message });
     }
 });
 

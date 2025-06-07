@@ -1,32 +1,31 @@
-// frontend-react/src/components/TarifaVenta.jsx
+// En frontend-react/src/components/TarifaVenta.jsx
+
 import { useState, useEffect, useCallback } from 'react';
-// Puedes reutilizar estilos de tabla de App.css o crear uno específico
 
 function TarifaVenta() {
   const [tarifaData, setTarifaData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedTipoTarifa, setSelectedTipoTarifa] = useState(''); // Cambiado a tipo_tarifa
+  const [selectedTipoTarifa, setSelectedTipoTarifa] = useState('');
 
-  const tiposTarifa = [ // Cambiado a tipos de tarifa
+  const tiposTarifa = [
     { value: '', label: 'Seleccione un tipo de tarifa...' },
     { value: 'final', label: 'Tarifa Cliente Final' },
     { value: 'fabricante', label: 'Tarifa Fabricante' },
     { value: 'metrajes', label: 'Tarifa Venta por Metrajes' },
-    { value: 'intermediario', label: 'Tarifa Intermediario' }, // Nuevo tipo de tarifa
+    { value: 'intermediario', label: 'Tarifa Intermediario' },
   ];
 
   const fetchTarifaVenta = useCallback(async () => {
     if (!selectedTipoTarifa) {
-      setTarifaData([]); // Limpiar datos si no hay tipo de tarifa seleccionado
+      setTarifaData([]);
       return;
     }
 
     setLoading(true);
     setError(null);
-    // Cambiado el endpoint para obtener la tarifa de productos terminados
     const apiUrl = `http://localhost:5002/api/tarifa-venta?tipo_tarifa=${selectedTipoTarifa}`;
-    console.log("Llamando a API para tarifa de venta de Productos Terminados:", apiUrl);
+    console.log("Llamando a API para tarifa de venta de Materiales:", apiUrl);
 
     try {
       const response = await fetch(apiUrl);
@@ -45,18 +44,17 @@ function TarifaVenta() {
     }
   }, [selectedTipoTarifa]);
 
-  // Cargar la tarifa cuando se selecciona un tipo de tarifa válido
   useEffect(() => {
     if (selectedTipoTarifa) {
       fetchTarifaVenta();
     } else {
-      setTarifaData([]); // Limpiar si se deselecciona
+      setTarifaData([]);
     }
   }, [selectedTipoTarifa, fetchTarifaVenta]);
 
   return (
     <div className="tarifa-venta-container">
-      <h2>Tarifa de Venta de Productos Terminados</h2> {/* Título actualizado */}
+      <h2>Tarifa de Venta de Materiales en Stock</h2>
 
       <div className="filtros-container" style={{ maxWidth: '400px', marginBottom: '20px' }}>
         <div className="filtro-item">
@@ -75,9 +73,8 @@ function TarifaVenta() {
 
       {loading && <p>Generando tarifa...</p>}
       {error && <p className="error-backend">Error al generar tarifa: {error}</p>}
-
       {!loading && !error && selectedTipoTarifa && tarifaData.length === 0 && (
-        <p>No hay datos de tarifa para mostrar para el tipo de tarifa seleccionado (o no hay productos terminados activos para calcularla).</p>
+        <p>No hay materiales en stock para mostrar.</p>
       )}
       {!loading && !error && !selectedTipoTarifa && (
         <p>Por favor, seleccione un tipo de tarifa para verla.</p>
@@ -87,23 +84,23 @@ function TarifaVenta() {
         <table>
           <thead>
             <tr>
-              <th>Referencia Producto</th> {/* Nuevo campo */}
-              <th>Nombre Producto</th> {/* Nuevo campo */}
-              <th>Unidad</th> {/* Nuevo campo */}
-              <th>Coste Base Fabricación (€)</th> {/* Nuevo campo */}
-              <th>Margen (%)</th>
-              <th>Precio Venta aplicado margen (€)</th>
+              <th>Referencia Stock</th>
+              <th>Descripción Material</th>
+              <th>Unidad</th>
+              <th>Coste Metro Lineal (€)</th>
+              <th>Margen Aplicado (%)</th>
+              <th>Precio Venta Metro Lineal (€)</th>
             </tr>
           </thead>
           <tbody>
-            {tarifaData.map((item, index) => (
-              <tr key={`${item.producto_referencia}-${index}`}> {/* Clave más robusta */}
-                <td>{item.producto_referencia}</td>
-                <td>{item.producto_nombre}</td>
+            {tarifaData.map(item => (
+              <tr key={item.id}>
+                <td>{item.referencia_stock}</td>
+                <td>{item.descripcion}</td>
                 <td>{item.unidad_medida}</td>
-                <td>{item.coste_base_fabricacion.toFixed(4)}</td>
+                <td>{item.coste_metro_lineal.toFixed(4)}</td>
                 <td>{(item.margen_aplicado * 100).toFixed(2)}%</td>
-                <td>{item.precio_venta_aplicado_margen.toFixed(2)}</td>
+                <td>{item.precio_venta_metro_lineal.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
