@@ -17,6 +17,7 @@ const {
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
 
+    crearItem,
     actualizarReferenciaProductoTerminado,
     insertarProductoTerminado,
     consultarProductosTerminados,
@@ -193,14 +194,21 @@ function crearTablasSiNoExisten() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER NOT NULL,
             lote TEXT NOT NULL UNIQUE,
+            cantidad_inicial REAL NOT NULL,
             cantidad_actual REAL NOT NULL,
             coste_lote REAL NOT NULL,
             ubicacion TEXT,
             pedido_id INTEGER,
+            orden_produccion_id INTEGER,
             fecha_entrada TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'DISPONIBLE',
             FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE,
-            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL
-        )`, (err) => { if (err) console.error("Error creando tabla Stock:", err.message); });
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL,
+            FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
+        )`, (err) => {
+            if (err) console.error("Error creando tabla Stock:", err.message);
+            else console.log("Tabla 'Stock' verificada/creada.");
+        });
 
         // 4. Tablas de Fabricación (ahora apuntan a Items)
         db.run(`CREATE TABLE IF NOT EXISTS Recetas (
@@ -848,6 +856,24 @@ app.post('/api/recetas', async (req, res) => {
     } catch (error) {
         console.error("Error en POST /api/recetas:", error.message);
         res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
+    }
+});
+
+app.post('/api/items', async (req, res) => {
+    console.log('Node.js: Solicitud a POST /api/items');
+    try {
+        const itemData = req.body;
+        if (!itemData.sku || !itemData.descripcion || !itemData.tipo_item) {
+            return res.status(400).json({ error: "SKU, descripción y tipo_item son requeridos." });
+        }
+        const newItem = await crearItem(itemData);
+        res.status(201).json({ id: newItem.id, mensaje: `Item ${itemData.sku} creado con éxito.` });
+    } catch (error) {
+        console.error("Error en POST /api/items:", error.message);
+        if (error.message.includes('ya existe')) {
+            return res.status(409).json({ error: error.message });
+        }
+        res.status(500).json({ error: "Error interno al crear el item." });
     }
 });
 

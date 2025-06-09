@@ -1989,6 +1989,29 @@ async function consultarItems(filtros = {}) {
     return await allDB(sql, params);
 }
 
+// En backend-node/db_operations.js
+
+async function crearItem(itemData) {
+    const sql = `INSERT INTO Items (sku, descripcion, tipo_item, familia, espesor, ancho, unidad_medida) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+        itemData.sku,
+        itemData.descripcion,
+        itemData.tipo_item,
+        itemData.familia || null,
+        itemData.espesor || null,
+        itemData.ancho || null,
+        itemData.unidad_medida
+    ];
+    try {
+        const result = await runDB(sql, params);
+        return { id: result.lastID };
+    } catch (error) {
+        if (error.code === 'SQLITE_CONSTRAINT' && error.message.includes('Items.sku')) {
+            throw new Error(`El SKU '${itemData.sku}' ya existe.`);
+        }
+        throw error;
+    }
+}
 
 
 // --- Funciones para la configuración (leer/escribir config.json) ---
@@ -2073,6 +2096,8 @@ module.exports = {
 
     calcularCosteProcesos,
     obtenerUltimoCosteMaterialGenerico,
+
+    crearItem,
 
     consultarItems,
 
