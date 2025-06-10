@@ -25,8 +25,7 @@ function runAsync(db, sql, params = []) {
 async function crearTablasSiNoExisten(db) {
     console.log("Verificando/Creando tablas en orden secuencial...");
     // Tablas sin dependencias
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS Items (id INTEGER PRIMARY KEY, sku TEXT UNIQUE, descripcion TEXT, tipo_item TEXT, familia TEXT, espesor TEXT, ancho REAL, unidad_medida TEXT, coste_estandar REAL)`);
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS PedidosProveedores (id INTEGER PRIMARY KEY, numero_factura TEXT UNIQUE, proveedor TEXT, fecha_pedido TEXT, fecha_llegada TEXT, origen_tipo TEXT, observaciones TEXT, valor_conversion REAL)`);
+    await runAsync(db, `CREATE TABLE IF NOT EXISTS Items (id INTEGER PRIMARY KEY, sku TEXT UNIQUE, descripcion TEXT, tipo_item TEXT, familia TEXT, espesor TEXT, ancho REAL, unidad_medida TEXT, coste_estandar REAL, status TEXT DEFAULT 'ACTIVO')`);    await runAsync(db, `CREATE TABLE IF NOT EXISTS PedidosProveedores (id INTEGER PRIMARY KEY, numero_factura TEXT UNIQUE, proveedor TEXT, fecha_pedido TEXT, fecha_llegada TEXT, origen_tipo TEXT, observaciones TEXT, valor_conversion REAL)`);
     await runAsync(db, `CREATE TABLE IF NOT EXISTS Maquinaria (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, descripcion TEXT, coste_hora_operacion REAL)`);
 
     // Tablas con dependencias de primer nivel
@@ -39,6 +38,7 @@ async function crearTablasSiNoExisten(db) {
     await runAsync(db, `CREATE TABLE IF NOT EXISTS Recetas (id INTEGER PRIMARY KEY, producto_id INTEGER, material_id INTEGER, cantidad_requerida REAL, FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE, FOREIGN KEY(material_id) REFERENCES Items(id))`);
     await runAsync(db, `CREATE TABLE IF NOT EXISTS Stock (id INTEGER PRIMARY KEY, item_id INTEGER, lote TEXT UNIQUE, cantidad_inicial REAL, cantidad_actual REAL, coste_lote REAL, ubicacion TEXT, pedido_id INTEGER, orden_produccion_id INTEGER, fecha_entrada TEXT, status TEXT, FOREIGN KEY(item_id) REFERENCES Items(id), FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id), FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id))`);
     
+    await runAsync(db, `CREATE TABLE IF NOT EXISTS ProcesosFabricacion (id INTEGER PRIMARY KEY, producto_id INTEGER, maquinaria_id INTEGER, nombre_proceso TEXT, tiempo_estimado_segundos INTEGER, aplica_a_clientes TEXT, FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE, FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id))`);
     console.log("Creación de tablas completada.");
 }
 

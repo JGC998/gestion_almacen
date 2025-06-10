@@ -15,7 +15,7 @@ function GestionProcesosFabricacion() {
     producto_terminado_id: '',
     maquinaria_id: '',
     nombre_proceso: '',
-    tiempo_estimado_horas: '',
+    tiempo_estimado_segundos: '',
     aplica_a_clientes: 'ALL' // NUEVO CAMPO: Por defecto 'ALL'
   });
 
@@ -78,10 +78,11 @@ function GestionProcesosFabricacion() {
   };
 
   const handleEdit = (proceso) => {
+    // CAMBIO al editar
     setCurrentProceso({
       ...proceso,
-      tiempo_estimado_horas: parseFloat(proceso.tiempo_estimado_horas).toFixed(2),
-      aplica_a_clientes: proceso.aplica_a_clientes || 'ALL', // Asegurar valor por defecto
+      tiempo_estimado_segundos: parseInt(proceso.tiempo_estimado_segundos) || '', // Se asegura que sea entero
+      aplica_a_clientes: proceso.aplica_a_clientes || 'ALL',
     });
     setEditMode(true);
     setSuccessMessage('');
@@ -120,12 +121,13 @@ function GestionProcesosFabricacion() {
     setSuccessMessage('');
     setError(null);
 
+    // CAMBIO en el payload
     const payload = {
       ...currentProceso,
       producto_terminado_id: parseInt(currentProceso.producto_terminado_id),
       maquinaria_id: parseInt(currentProceso.maquinaria_id),
-      tiempo_estimado_horas: parseFloat(currentProceso.tiempo_estimado_horas),
-      aplica_a_clientes: currentProceso.aplica_a_clientes, // Incluir el nuevo campo
+      tiempo_estimado_segundos: parseInt(currentProceso.tiempo_estimado_segundos), // Se envía como entero
+      aplica_a_clientes: currentProceso.aplica_a_clientes,
     };
 
     const method = editMode ? 'PUT' : 'POST';
@@ -157,13 +159,14 @@ function GestionProcesosFabricacion() {
 
   const resetForm = () => {
     setEditMode(false);
+    // CAMBIO en el reset
     setCurrentProceso({
       id: null,
       producto_terminado_id: '',
       maquinaria_id: '',
       nombre_proceso: '',
-      tiempo_estimado_horas: '',
-      aplica_a_clientes: 'ALL' // Resetear a valor por defecto
+      tiempo_estimado_segundos: '',
+      aplica_a_clientes: 'ALL'
     });
     setSuccessMessage('');
     setError(null);
@@ -196,8 +199,7 @@ function GestionProcesosFabricacion() {
             </select>
           </label>
           <label>Nombre Proceso: <input type="text" name="nombre_proceso" value={currentProceso.nombre_proceso} onChange={handleChange} required /></label>
-          <label>Tiempo Estimado (Horas): <input type="number" step="0.01" name="tiempo_estimado_horas" value={currentProceso.tiempo_estimado_horas} onChange={handleChange} required /></label>
-          
+          <label>Tiempo Estimado (Segundos): <input type="number" step="1" name="tiempo_estimado_segundos" value={currentProceso.tiempo_estimado_segundos} onChange={handleChange} required /></label>          
           {/* NUEVO CAMPO: Aplica a Clientes */}
           <label>Aplica a Clientes:
             <select name="aplica_a_clientes" value={currentProceso.aplica_a_clientes} onChange={handleChange} required>
@@ -225,7 +227,7 @@ function GestionProcesosFabricacion() {
               <th>Producto Final</th>
               <th>Maquinaria</th>
               <th>Proceso</th>
-              <th>Tiempo Est. (h)</th>
+              <th>Tiempo Est. (s)</th>
               <th>Aplica a Clientes</th> {/* NUEVA COLUMNA */}
               <th>Acciones</th>
             </tr>
@@ -237,7 +239,7 @@ function GestionProcesosFabricacion() {
                 <td>{proc.producto_referencia} - {proc.producto_nombre}</td>
                 <td>{proc.maquinaria_nombre}</td>
                 <td>{proc.nombre_proceso}</td>
-                <td>{parseFloat(proc.tiempo_estimado_horas).toFixed(2)}</td>
+                <td>{proc.tiempo_estimado_segundos}</td>
                 <td>{proc.aplica_a_clientes || 'ALL'}</td> {/* Mostrar el nuevo campo */}
                 <td>
                   <button onClick={() => handleEdit(proc)} className="action-button empezada">Editar</button>

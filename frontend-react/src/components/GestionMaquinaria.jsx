@@ -1,6 +1,6 @@
 // frontend-react/src/components/GestionMaquinaria.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import '../App.css'; // Reutiliza estilos generales de App.css
+import '../App.css';
 
 function GestionMaquinaria() {
   const [maquinaria, setMaquinaria] = useState([]);
@@ -8,12 +8,12 @@ function GestionMaquinaria() {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [editMode, setEditMode] = useState(false);
+  // Se elimina 'coste_adquisicion' del estado
   const [currentMaquina, setCurrentMaquina] = useState({
     id: null,
     nombre: '',
     descripcion: '',
-    coste_adquisicion: '',
-    coste_hora_operacion: '' // Se eliminan vida_util_horas y depreciacion_hora
+    coste_hora_operacion: ''
   });
 
   const fetchMaquinaria = useCallback(async () => {
@@ -45,10 +45,9 @@ function GestionMaquinaria() {
   };
 
   const handleEdit = (maquina) => {
+    // Se elimina la lógica de 'coste_adquisicion'
     setCurrentMaquina({
       ...maquina,
-      coste_adquisicion: maquina.coste_adquisicion !== null ? parseFloat(maquina.coste_adquisicion).toFixed(2) : '',
-      // Se eliminan vida_util_horas y depreciacion_hora
       coste_hora_operacion: maquina.coste_hora_operacion !== null ? parseFloat(maquina.coste_hora_operacion).toFixed(4) : '',
     });
     setEditMode(true);
@@ -88,6 +87,7 @@ function GestionMaquinaria() {
     setSuccessMessage('');
     setError(null);
 
+    // El payload ya no contendrá 'coste_adquisicion'
     const method = editMode ? 'PUT' : 'POST';
     const url = editMode
       ? `http://localhost:5002/api/maquinaria/${currentMaquina.id}`
@@ -121,7 +121,6 @@ function GestionMaquinaria() {
       id: null,
       nombre: '',
       descripcion: '',
-      coste_adquisicion: '',
       coste_hora_operacion: ''
     });
     setSuccessMessage('');
@@ -140,7 +139,7 @@ function GestionMaquinaria() {
         <div className="form-grid">
           <label>Nombre: <input type="text" name="nombre" value={currentMaquina.nombre} onChange={handleChange} required /></label>
           <label>Descripción: <textarea name="descripcion" value={currentMaquina.descripcion} onChange={handleChange}></textarea></label>
-          <label>Coste Adquisición (€): <input type="number" step="0.01" name="coste_adquisicion" value={currentMaquina.coste_adquisicion} onChange={handleChange} /></label>
+          {/* Se elimina el input de 'coste_adquisicion' */}
           <label>Coste Hora Operación (€/h): <input type="number" step="0.0001" name="coste_hora_operacion" value={currentMaquina.coste_hora_operacion} onChange={handleChange} /></label>
         </div>
         <button type="submit" disabled={loading} className="submit-btn">
@@ -159,8 +158,8 @@ function GestionMaquinaria() {
               <th>ID</th>
               <th>Nombre</th>
               <th>Descripción</th>
-              <th>Coste Adq. (€)</th>
-              <th>Coste Op. (€/h)</th> {/* Se eliminan Vida Útil y Deprec. Hora */}
+              {/* Se elimina la cabecera de la tabla */}
+              <th>Coste Op. (€/h)</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -170,7 +169,7 @@ function GestionMaquinaria() {
                 <td>{maq.id}</td>
                 <td>{maq.nombre}</td>
                 <td>{maq.descripcion || '-'}</td>
-                <td>{parseFloat(maq.coste_adquisicion || 0).toFixed(2)}</td>
+                {/* Se elimina la celda de la tabla */}
                 <td>{parseFloat(maq.coste_hora_operacion || 0).toFixed(4)}</td>
                 <td>
                   <button onClick={() => handleEdit(maq)} className="action-button empezada">Editar</button>

@@ -1,19 +1,38 @@
 // frontend-react/src/components/FormularioPedidoNacional.jsx
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import './FormularioPedido.css';
 
+// Reutilizamos la misma estructura de familias
+const familias = {
+  GOMA: ['6mm', '8mm', '10mm', '12mm', '15mm'],
+  PVC: ['Blanco2mm', 'Blanco3mm', 'Verde2mm', 'Verde3mm', 'Azul2mm', 'Azul3mm'],
+  FIELTRO: ['Fieltro10', 'Fieltro15'],
+  CARAMELO: ['6mm', '8mm', '10mm', '12mm'],
+  VERDE: ['6mm', '8mm', '10mm', '12mm'],
+  NEGRA: ['6mm', '8mm', '10mm', '12mm'],
+};
+
 function FormularioPedidoNacional() {
-  const [availableItems, setAvailableItems] = useState([]);
+  const [familiaSeleccionada, setFamiliaSeleccionada] = useState('GOMA');
+
   const [pedido, setPedido] = useState({
     numero_factura: '',
     proveedor: '',
     fecha_pedido: new Date().toISOString().split('T')[0],
-    fecha_llegada: '',
     observaciones: '',
   });
 
   const [lineas, setLineas] = useState([
-    { temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '', ubicacion: '' }
+    {
+      id: Date.now(),
+      referencia_bobina: '',
+      espesor: '',
+      ancho: '',
+      largo: '',
+      peso_por_metro: '',
+      precio_unitario_original: '',
+      ubicacion: '',
+    }
   ]);
 
   const [gastos, setGastos] = useState([]);
@@ -21,29 +40,15 @@ function FormularioPedidoNacional() {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
 
-  useEffect(() => {
-    const fetchItems = async () => {
-      try {
-        const response = await fetch('http://localhost:5002/api/items?tipo_item=MATERIA_PRIMA');
-        if (!response.ok) throw new Error('No se pudieron cargar los artículos');
-        const data = await response.json();
-        setAvailableItems(data);
-      } catch (err) {
-        setError(err.message);
-      }
-    };
-    fetchItems();
-  }, []);
-
   const handlePedidoChange = (e) => {
     setPedido(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleLineaChange = (index, e) => {
+  const handleLineaChange = (id, e) => {
     const { name, value } = e.target;
-    const nuevasLineas = [...lineas];
-    nuevasLineas[index][name] = value;
-    setLineas(nuevasLineas);
+    setLineas(prevLineas => prevLineas.map(linea =>
+      linea.id === id ? { ...linea, [name]: value } : linea
+    ));
   };
   
   const handleGastoChange = (index, e) => {
@@ -54,12 +59,15 @@ function FormularioPedidoNacional() {
   };
 
   const addLinea = () => {
-    setLineas(prev => [...prev, { temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '', ubicacion: '' }]);
+    setLineas(prev => [...prev, {
+      id: Date.now(), referencia_bobina: '', espesor: '', ancho: '', largo: '',
+      peso_por_metro: '', precio_unitario_original: '', ubicacion: ''
+    }]);
   };
 
-  const removeLinea = (index) => {
+  const removeLinea = (id) => {
     if (lineas.length > 1) {
-      setLineas(prev => prev.filter((_, i) => i !== index));
+      setLineas(prev => prev.filter(linea => linea.id !== id));
     }
   };
 
@@ -68,33 +76,28 @@ function FormularioPedidoNacional() {
   };
 
   const removeGasto = (index) => {
-    if (gastos.length > 0) {
-      setGastos(prev => prev.filter((_, i) => i !== index));
-    }
+    setGastos(prev => prev.filter((_, i) => i !== index));
   };
   
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true); setError(null); setSuccessMessage('');
 
-    const lineasParaEnviar = lineas.map(({ temp_id, ...rest }) => ({
-      ...rest,
-      item_id: parseInt(rest.item_id, 10),
-      cantidad_original: parseFloat(rest.cantidad_original),
-      precio_unitario_original: parseFloat(rest.precio_unitario_original),
-      moneda_original: 'EUR'
+    const totalGastos = gastos.reduce((acc, g) => acc + (parseFloat(g.coste_eur) || 0), 0);
+    const totalMateriales = lineas.reduce((acc, l) => acc + ((parseFloat(l.largo) || 0) * (parseFloat(l.precio_unitario_original) || 0)), 0);
+    const porcentajeGastos = totalMateriales > 0 ? totalGastos / totalMateriales : 0;
+
+    const lineasParaEnviar = lineas.map(l => ({
+        ...l,
+        cantidad_original: parseFloat(l.largo) || 0,
+        moneda_original: 'EUR' // Para pedidos nacionales, la moneda es EUR
     }));
 
-    if (lineasParaEnviar.some(l => !l.item_id || isNaN(l.item_id))) {
-        setError("Todas las líneas deben tener un artículo seleccionado.");
-        setLoading(false);
-        return;
-    }
-
     const payload = {
-      pedido: { ...pedido, origen_tipo: 'NACIONAL' },
+      pedido: { ...pedido, origen_tipo: 'NACIONAL', porcentajeGastos },
       lineas: lineasParaEnviar,
       gastos,
+      material_tipo_general: familiaSeleccionada,
     };
 
     try {
@@ -106,9 +109,10 @@ function FormularioPedidoNacional() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.detalle || `Error del servidor`);
       setSuccessMessage(`¡Pedido Nacional (ID: ${data.pedidoId}) creado con éxito!`);
-      setLineas([{ temp_id: Date.now(), item_id: '', cantidad_original: '', precio_unitario_original: '', ubicacion: '' }]);
+      // Resetear formulario
+      setLineas([{ id: Date.now(), referencia_bobina: '', espesor: '', ancho: '', largo: '', peso_por_metro: '', precio_unitario_original: '', ubicacion: '' }]);
       setGastos([]);
-      setPedido({ numero_factura: '', proveedor: '', fecha_pedido: new Date().toISOString().split('T')[0], fecha_llegada: '', observaciones: ''});
+      setPedido({ numero_factura: '', proveedor: '', fecha_pedido: new Date().toISOString().split('T')[0], observaciones: ''});
 
     } catch (err) {
       setError(err.message);
@@ -127,33 +131,36 @@ function FormularioPedidoNacional() {
         <fieldset>
           <legend>Datos del Pedido</legend>
           <div className="form-grid">
+             <div>
+              <label htmlFor="familiaSelect">Familia del Pedido:</label>
+              <select id="familiaSelect" value={familiaSeleccionada} onChange={(e) => setFamiliaSeleccionada(e.target.value)}>
+                {Object.keys(familias).map(fam => <option key={fam} value={fam}>{fam}</option>)}
+              </select>
+            </div>
             <label>Nº Factura: <input type="text" name="numero_factura" value={pedido.numero_factura} onChange={handlePedidoChange} required /></label>
             <label>Proveedor: <input type="text" name="proveedor" value={pedido.proveedor} onChange={handlePedidoChange} /></label>
             <label>Fecha Pedido: <input type="date" name="fecha_pedido" value={pedido.fecha_pedido} onChange={handlePedidoChange} required /></label>
-            <label>Fecha Llegada: <input type="date" name="fecha_llegada" value={pedido.fecha_llegada} onChange={handlePedidoChange} required /></label>
           </div>
         </fieldset>
 
-        <h3>Líneas del Pedido</h3>
-        {lineas.map((linea, index) => (
-          <fieldset key={linea.temp_id} className="linea-item">
-            <legend>Línea {index + 1}</legend>
-            <div className="form-grid-lineas" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
-              <label>Artículo (Materia Prima)*:
-                <select name="item_id" value={linea.item_id} onChange={(e) => handleLineaChange(index, e)} required>
-                  <option value="">-- Selecciona un artículo --</option>
-                  {availableItems.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.sku} - {item.descripcion}
-                    </option>
-                  ))}
+        <h3>Líneas del Pedido (Materias Primas)</h3>
+        {lineas.map((linea) => (
+          <fieldset key={linea.id} className="linea-item">
+            <legend>Línea de Material</legend>
+            <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))'}}>
+              <label>Referencia Bobina*: <input type="text" name="referencia_bobina" value={linea.referencia_bobina} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Tipo/Espesor*:
+                <select name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(linea.id, e)} required>
+                    <option value="">-- Selecciona --</option>
+                    {familias[familiaSeleccionada].map(subtipo => <option key={subtipo} value={subtipo}>{subtipo}</option>)}
                 </select>
               </label>
-              <label>Cantidad*: <input type="number" step="0.01" name="cantidad_original" value={linea.cantidad_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Precio Unitario (€)*: <input type="number" step="0.01" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(index, e)} /></label>
+              <label>Ancho (mm)*: <input type="number" name="ancho" value={linea.ancho} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Largo (m)*: <input type="number" step="0.01" name="largo" value={linea.largo} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Precio Unitario (€/m)*: <input type="number" step="0.01" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(linea.id, e)} /></label>
             </div>
-            {lineas.length > 1 && <button type="button" onClick={() => removeLinea(index)} className="remove-btn">Eliminar Línea</button>}
+            <button type="button" onClick={() => removeLinea(linea.id)} className="remove-btn">Eliminar Línea</button>
           </fieldset>
         ))}
         <button type="button" onClick={addLinea} className="add-btn">Añadir Línea</button>
@@ -166,7 +173,7 @@ function FormularioPedidoNacional() {
               <label>Descripción: <input type="text" name="descripcion" value={gasto.descripcion} onChange={(e) => handleGastoChange(index, e)} required /></label>
               <label>Coste (€): <input type="number" step="0.01" name="coste_eur" value={gasto.coste_eur} onChange={(e) => handleGastoChange(index, e)} required /></label>
             </div>
-            {gastos.length > 1 && <button type="button" onClick={() => removeGasto(index)} className="remove-btn">Eliminar Gasto</button>}
+            {gastos.length > 0 && <button type="button" onClick={() => removeGasto(index)} className="remove-btn">Eliminar Gasto</button>}
           </fieldset>
         ))}
         <button type="button" onClick={addGasto} className="add-btn">Añadir Gasto</button>

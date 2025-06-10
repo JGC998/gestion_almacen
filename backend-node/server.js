@@ -10,7 +10,6 @@ const fs = require('fs');
 // --- Importar funciones de db_operations.js ---
 const {
     consultarStock,
-    consultarItemStockPorId,
     procesarNuevoPedido,
     consultarListaPedidos,
     obtenerDetallesCompletosPedido,
@@ -50,11 +49,6 @@ const {
     eliminarOrdenProduccion,
     procesarOrdenProduccion,
 
-    insertarStockProductoTerminado,
-    consultarStockProductosTerminados,
-    consultarStockProductoTerminadoPorId,
-    actualizarStockProductoTerminado,
-    eliminarStockProductoTerminado,
 
     actualizarCosteFabricacionEstandar,
 
@@ -147,14 +141,15 @@ function crearTablasSiNoExisten() {
         // 1. Tabla Maestra de Artículos (reemplaza a ProductosTerminados y las descripciones de Stock)
         db.run(`CREATE TABLE IF NOT EXISTS Items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sku TEXT UNIQUE NOT NULL,                       -- Código de artículo único (ej: GOM-EPDM-6-1000)
+            sku TEXT UNIQUE NOT NULL,
             descripcion TEXT NOT NULL,
             tipo_item TEXT NOT NULL CHECK(tipo_item IN ('MATERIA_PRIMA', 'COMPONENTE', 'PRODUCTO_TERMINADO')),
-            familia TEXT,                                   -- GOMA, FIELTRO, FALDETAS...
+            familia TEXT,
             espesor TEXT,
             ancho REAL,
-            unidad_medida TEXT NOT NULL,                    -- m, kg, unidad
-            coste_estandar REAL DEFAULT 0
+            unidad_medida TEXT NOT NULL,
+            coste_estandar REAL DEFAULT 0,
+            status TEXT DEFAULT 'ACTIVO'  -- <--- COLUMNA AÑADIDA
         )`, (err) => { if (err) console.error("Error creando tabla Items:", err.message); });
 
         // 2. Tablas de Compras (se mantienen pero LineasPedido ahora apunta a Items)
@@ -388,37 +383,36 @@ function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
 
 
 app.post('/api/pedidos-nacionales', async (req, res) => {
-    const { pedido, lineas, gastos, material_tipo } = req.body;
+    // Se usa 'material_tipo_general' que es lo que envía el frontend
+    const { pedido, lineas, gastos, material_tipo_general } = req.body;
 
-    console.log(`Node.js: POST /api/pedidos-nacionales, Material: ${material_tipo}`);
+    console.log(`Node.js: POST /api/pedidos-nacionales, Material: ${material_tipo_general}`);
 
-    if (!pedido || !lineas || !gastos || !material_tipo) {
-        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos' y 'material_tipo'." });
+    if (!pedido || !lineas || !gastos || !material_tipo_general) {
+        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos' y 'material_tipo_general'." });
     }
-    if (!['GOMA', 'PVC', 'FIELTRO'].includes(material_tipo.toUpperCase())) {
-        return res.status(400).json({ error: "Valor de 'material_tipo' no válido." });
-    }
-    if (!Array.isArray(lineas) || lineas.length === 0) {
-        return res.status(400).json({ error: "Debe haber al menos una línea de pedido." });
+    
+    // El resto de la lógica no necesita cambiar, pero hay que pasar el parámetro correcto.
+    const tiposFamiliaValidos = ['GOMA', 'PVC', 'FIELTRO', 'VERDE', 'CARAMELO', 'NEGRA'];
+    if (!tiposFamiliaValidos.includes(material_tipo_general.toUpperCase())) {
+        return res.status(400).json({ error: "Valor de 'material_tipo_general' no válido." });
     }
 
     try {
-        const lineasConCostes = calcularCostesLinea(lineas, gastos);
-
         const datosParaDB = {
             pedido: { ...pedido, origen_tipo: 'NACIONAL' },
-            lineas: lineasConCostes,
+            lineas: lineas,
             gastos: gastos,
-            material_tipo_general: material_tipo.toUpperCase()
+            material_tipo_general: material_tipo_general // Se pasa el parámetro correcto
         };
 
         const resultado = await procesarNuevoPedido(datosParaDB);
 
-        console.log(`Node.js: Pedido NACIONAL de ${material_tipo} creado con ID: ${resultado.pedidoId}`);
+        console.log(`Node.js: Pedido NACIONAL de ${material_tipo_general} creado con ID: ${resultado.pedidoId}`);
         res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
 
     } catch (error) {
-        console.error(`Error en POST /api/pedidos-nacionales (${material_tipo}):`, error.message);
+        console.error(`Error en POST /api/pedidos-nacionales (${material_tipo_general}):`, error.message);
         if (error.message.includes("ya existe")) {
              return res.status(409).json({ error: error.message });
         }
@@ -427,45 +421,41 @@ app.post('/api/pedidos-nacionales', async (req, res) => {
 });
 
 app.post('/api/pedidos-importacion', async (req, res) => {
-    const { pedido, lineas, gastos, material_tipo, valor_conversion } = req.body;
+    // Se desestructura 'material_tipo_general' y se obtiene 'valor_conversion' desde dentro del objeto 'pedido'
+    const { pedido, lineas, gastos, material_tipo_general } = req.body;
+    const valor_conversion = pedido.valor_conversion;
 
-    console.log(`Node.js: POST /api/pedidos-importacion, Material: ${material_tipo}, Conv: ${valor_conversion}`);
+    console.log(`Node.js: POST /api/pedidos-importacion, Material: ${material_tipo_general}, Conv: ${valor_conversion}`);
 
-    if (!pedido || !lineas || !gastos || !material_tipo || valor_conversion === undefined) {
-        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos', 'material_tipo' y 'valor_conversion'." });
+    if (!pedido || !lineas || !gastos || !material_tipo_general || valor_conversion === undefined) {
+        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos', 'material_tipo_general' y 'valor_conversion'." });
     }
-    if (!['GOMA', 'PVC', 'FIELTRO'].includes(material_tipo.toUpperCase())) {
-        return res.status(400).json({ error: "Valor de 'material_tipo' no válido." });
-    }
+
     const vc = parseFloat(valor_conversion);
     if (isNaN(vc) || vc <= 0) {
         return res.status(400).json({ error: "El 'valor_conversion' debe ser un número positivo." });
     }
-    if (!Array.isArray(lineas) || lineas.length === 0) {
-        return res.status(400).json({ error: "Debe haber al menos una línea de pedido." });
-    }
+    
     const tiposGastoImportacionValidos = ['SUPLIDOS', 'EXENTO', 'SUJETO'];
     if (gastos.some(g => !tiposGastoImportacionValidos.includes(g.tipo_gasto?.toUpperCase()))) {
         return res.status(400).json({ error: `Tipos de gasto para importación deben ser ${tiposGastoImportacionValidos.join(', ')}`});
     }
 
     try {
-        const lineasConCostes = calcularCostesLinea(lineas, gastos, vc);
-
         const datosParaDB = {
             pedido: { ...pedido, origen_tipo: 'CONTENEDOR', valor_conversion: vc },
-            lineas: lineasConCostes,
+            lineas: lineas,
             gastos: gastos.map(g => ({...g, tipo_gasto: g.tipo_gasto.toUpperCase()})),
-            material_tipo_general: material_tipo.toUpperCase()
+            material_tipo_general: material_tipo_general.toUpperCase()
         };
 
         const resultado = await procesarNuevoPedido(datosParaDB);
 
-        console.log(`Node.js: Pedido de IMPORTACIÓN de ${material_tipo} creado con ID: ${resultado.pedidoId}`);
+        console.log(`Node.js: Pedido de IMPORTACIÓN de ${material_tipo_general} creado con ID: ${resultado.pedidoId}`);
         res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
 
     } catch (error) {
-        console.error(`Error en POST /api/pedidos-importacion (${material_tipo}):`, error.message);
+        console.error(`Error en POST /api/pedidos-importacion (${material_tipo_general}):`, error.message);
         if (error.message.includes("ya existe")) {
              return res.status(409).json({ error: error.message });
         }
@@ -533,6 +523,8 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
 // MODIFICADA: Endpoint /api/tarifa-venta para usar ProductosTerminados
 // En backend-node/server.js
 
+// ... en backend-node/server.js
+
 app.get('/api/tarifa-venta', async (req, res) => {
     const { tipo_tarifa } = req.query;
 
@@ -548,29 +540,33 @@ app.get('/api/tarifa-venta', async (req, res) => {
     }
 
     try {
-        const configuraciones = appConfig;
+        const configuracionesApp = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
         const claveMargen = `margen_default_${tipoTarifaNormalizado}`;
-        let margenAplicado = configuraciones[claveMargen];
+        let margenAplicado = configuracionesApp[claveMargen];
 
         if (margenAplicado === undefined || isNaN(parseFloat(margenAplicado))) {
             margenAplicado = 0;
         }
         margenAplicado = parseFloat(margenAplicado);
 
-        const stockItems = await consultarStockMateriasPrimas({ status: 'DISPONIBLE,EMPEZADA' });
+        // --- CORRECCIÓN AQUÍ ---
+        // Se reemplaza la función obsoleta y se filtran solo materias primas.
+        const stockItems = await consultarStock({ status: 'DISPONIBLE,EMPEZADA' });
+        const materiasPrimasEnStock = stockItems.filter(item => item.familia !== 'FALDETA' && item.tipo_item !== 'PRODUCTO_TERMINADO'); // Asumiendo que los productos terminados tienen una familia o tipo diferente.
 
-        if (stockItems.length === 0) {
+        if (materiasPrimasEnStock.length === 0) {
             return res.json([]);
         }
 
-        const tarifaVentaMateriales = stockItems.map(item => {
-            const costeBase = parseFloat(item.coste_unitario_final) || 0;
+        const tarifaVentaMateriales = materiasPrimasEnStock.map(item => {
+            // Se usan los nuevos nombres de campo: coste_lote y sku.
+            const costeBase = parseFloat(item.coste_lote) || 0;
             const precioVenta = costeBase * (1 + margenAplicado);
 
             return {
                 id: item.id,
-                referencia_stock: item.referencia_stock,
-                descripcion: `${item.material_tipo} ${item.espesor || ''} ${item.subtipo_material || ''} ${item.ancho || ''}mm ${item.color || ''}`.trim().replace(/\s+/g, ' '),
+                referencia_stock: item.sku, // Campo corregido
+                descripcion: item.descripcion, // Usamos la descripción directa del item
                 unidad_medida: item.unidad_medida,
                 coste_metro_lineal: costeBase,
                 margen_aplicado: margenAplicado,
@@ -588,87 +584,43 @@ app.get('/api/tarifa-venta', async (req, res) => {
 });
 
 
-// --- ENDPOINTS PARA LA FASE 5 (ACTUALIZADOS) ---
+// ... el resto del archivo server.js
 
+
+// En backend-node/server.js
+
+// VOY A REEMPLAZAR EL ENDPOINT 'POST /api/productos-terminados' POR ESTA VERSIÓN SIMPLIFICADA:
 app.post('/api/productos-terminados', async (req, res) => {
     const productoData = req.body;
     console.log('Node.js: POST /api/productos-terminados, datos recibidos:', productoData);
 
-    if (!productoData.nombre || !productoData.material_principal || !productoData.espesor_principal ||
-        productoData.ancho_final === undefined || productoData.largo_final === undefined) {
-        return res.status(400).json({ error: "Nombre, material principal, espesor principal, ancho final y largo final de la plantilla son requeridos." });
+    if (!productoData.nombre || !productoData.material_principal || !productoData.espesor_principal) {
+        return res.status(400).json({ error: "Nombre, material principal y espesor son requeridos." });
     }
-
-    // Validar que ancho_final y largo_final sean números
-    const anchoFinalNum = parseFloat(productoData.ancho_final);
-    const largoFinalNum = parseFloat(productoData.largo_final);
-
-    if (isNaN(anchoFinalNum) || anchoFinalNum <= 0) {
-        return res.status(400).json({ error: "El 'ancho_final' debe ser un número positivo." });
-    }
-    if (isNaN(largoFinalNum) || largoFinalNum <= 0) {
-        return res.status(400).json({ error: "El 'largo_final' debe ser un número positivo." });
-    }
-    // Sobrescribir con los números parseados para asegurar consistencia
-    productoData.ancho_final = anchoFinalNum;
-    productoData.largo_final = largoFinalNum;
-
-
-    const db = conectarDB(); // Obtener una instancia de DB para la transacción. Es crucial que sea la misma instancia para todas las operaciones de la transacción.
 
     try {
-        await runAsync(db, 'BEGIN TRANSACTION;'); // Iniciar transacción
+        // La lógica de transacción ya no es necesaria aquí para este propósito
+        // La función 'insertarProductoTerminado' ahora maneja la creación completa del Item
+        const productoId = await insertarProductoTerminado(productoData);
 
-        // 1. Insertar el producto (que ahora inserta NULL para referencia)
-        // La función insertarProductoTerminado debe estar adaptada para usar dbInstance (db en este caso) y runAsync.
-        const productoId = await insertarProductoTerminado(db, productoData);
-
-        // 2. Generar y actualizar la referencia
-        const referenciaGenerada = `PT-${productoId.toString().padStart(5, '0')}`;
-        // La función actualizarReferenciaProductoTerminado también debe usar dbInstance y runAsync.
-        await actualizarReferenciaProductoTerminado(db, productoId, referenciaGenerada);
-
-        // 3. Recalcular/actualizar el coste estándar.
-        // Esta función y las que llama (calcularCosteMateriales, calcularCosteProcesos, obtenerUltimoCosteMaterialGenerico)
-        // deben estar adaptadas para usar dbInstance y los helpers ...Async.
-        // El 'coste_fabricacion_estandar' enviado desde el frontend (productoData.coste_fabricacion_estandar)
-        // es el coste de material estimado, que se guarda inicialmente por insertarProductoTerminado.
-        // Esta llamada lo recalculará (o lo confirmará si la lógica de cálculo da el mismo resultado).
+        // Después de crear, recalculamos el coste estándar
         await actualizarCosteFabricacionEstandar(productoId, appConfig);
 
-        await runAsync(db, 'COMMIT;'); // Confirmar transacción
+        // Obtenemos el producto recién creado para devolver su referencia (SKU)
+        const nuevoProducto = await consultarProductoTerminadoPorId(productoId);
 
-        console.log(`Plantilla de producto ID ${productoId} creada con referencia ${referenciaGenerada}.`);
-        res.status(201).json({ mensaje: "Plantilla de producto creada con éxito.", id: productoId, referencia: referenciaGenerada });
+        console.log(`Plantilla de producto ID ${productoId} creada con referencia ${nuevoProducto.referencia}.`);
+        res.status(201).json({ 
+            mensaje: "Plantilla de producto creada con éxito.", 
+            id: productoId, 
+            referencia: nuevoProducto.referencia 
+        });
 
     } catch (error) {
-        console.error("Error en POST /api/productos-terminados (transacción):", error.message, error.stack);
-        if (db) { // Solo intentar ROLLBACK si db está definida
-            try {
-                await runAsync(db, 'ROLLBACK;');
-                console.log("Transacción revertida (ROLLBACK) en POST /api/productos-terminados.");
-            } catch (rollbackError) {
-                console.error("Error crítico durante ROLLBACK en POST /api/productos-terminados:", rollbackError.message, rollbackError.stack);
-            }
-        }
-        // Manejo de errores específicos
-        if (error.message && error.message.toUpperCase().includes("UNIQUE CONSTRAINT FAILED")) {
-            if (error.message.includes("ProductosTerminados.referencia")) {
-                 return res.status(409).json({ error: "Conflicto al generar referencia única. Intente de nuevo.", detalle: error.message });
-            } else if (error.message.includes("ProductosTerminados.nombre")) { // Si haces el nombre único
-                 return res.status(409).json({ error: "El nombre de la plantilla de producto ya existe.", detalle: error.message });
-            }
-        }
+        console.error("Error en POST /api/productos-terminados:", error.message);
         res.status(500).json({ error: "Error interno del servidor al crear la plantilla de producto.", detalle: error.message });
-    } finally {
-        if (db) { // Solo cerrar si db está definida
-            db.close((err) => {
-                if (err) console.error("Error cerrando la BD en POST /api/productos-terminados:", err.message);
-            });
-        }
     }
 });
-// ...
 
 // GET para obtener todos los productos terminados
 app.get('/api/productos-terminados', async (req, res) => {
@@ -1238,91 +1190,6 @@ app.post('/api/calcular-presupuesto-producto-terminado', async (req, res) => {
     }
 });
 
-// --- StockProductosTerminados ---
-app.post('/api/stock-productos-terminados', async (req, res) => {
-    const stockData = req.body;
-    console.log('Node.js: POST /api/stock-productos-terminados', stockData);
-    if (!stockData.producto_id || !stockData.cantidad_actual || !stockData.coste_unitario_final || !stockData.fecha_entrada_almacen) {
-        return res.status(400).json({ error: "Datos de stock de producto terminado incompletos." });
-    }
-    try {
-        const id = await insertarStockProductoTerminado(stockData);
-        res.status(201).json({ mensaje: "Stock de producto terminado añadido con éxito.", id });
-    } catch (error) {
-        console.error("Error en POST /api/stock-productos-terminados:", error.message);
-        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
-    }
-});
-
-app.get('/api/stock-productos-terminados', async (req, res) => {
-    const filtros = req.query;
-    console.log('Node.js: GET /api/stock-productos-terminados', filtros);
-    try {
-        const stock = await consultarStockProductosTerminados(filtros);
-        res.json(stock);
-    } catch (error) {
-        console.error("Error en GET /api/stock-productos-terminados:", error.message);
-        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
-    }
-});
-
-app.get('/api/stock-productos-terminados/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    console.log('Node.js: GET /api/stock-productos-terminados/:id', id);
-    if (isNaN(id)) {
-        return res.status(400).json({ error: "ID de stock de producto terminado no válido." });
-    }
-    try {
-        const item = await consultarStockProductoTerminadoPorId(id);
-        if (item) {
-            res.json(item);
-        } else {
-            res.status(404).json({ error: "Stock de producto terminado no encontrado." });
-        }
-    } catch (error) {
-        console.error("Error en GET /api/stock-productos-terminados/:id:", error.message);
-        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
-    }
-});
-
-app.put('/api/stock-productos-terminados/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    const updates = req.body;
-    console.log('Node.js: PUT /api/stock-productos-terminados/:id', id, updates);
-    if (isNaN(id) || Object.keys(updates).length === 0) {
-        return res.status(400).json({ error: "ID de stock de producto terminado no válido o no se proporcionaron datos para actualizar." });
-    }
-    try {
-        const changes = await actualizarStockProductoTerminado(id, updates);
-        if (changes > 0) {
-            res.json({ mensaje: `Stock de producto terminado ID ${id} actualizado con éxito.` });
-        } else {
-            res.status(404).json({ error: "Stock de producto terminado no encontrado para actualizar." });
-        }
-    } catch (error) {
-        console.error("Error en PUT /api/stock-productos-terminados/:id:", error.message);
-        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
-    }
-});
-
-app.delete('/api/stock-productos-terminados/:id', async (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    console.log('Node.js: DELETE /api/stock-productos-terminados/:id', id);
-    if (isNaN(id)) {
-        return res.status(400).json({ error: "ID de stock de producto terminado no válido." });
-    }
-    try {
-        const changes = await eliminarStockProductoTerminado(id);
-        if (changes > 0) {
-            res.json({ mensaje: `Stock de producto terminado ID ${id} eliminado con éxito.` });
-        } else {
-            res.status(404).json({ error: "Stock de producto terminado no encontrado para eliminar." });
-        }
-    } catch (error) {
-        console.error("Error en DELETE /api/stock-productos-terminados/:id:", error.message);
-        res.status(500).json({ error: "Error interno del servidor.", detalle: error.message });
-    }
-});
 
 // --- Endpoint para consultar referencias de stock con último coste (para auto-rellenar) ---
 app.get('/api/referencias-stock-con-coste', async (req, res) => {

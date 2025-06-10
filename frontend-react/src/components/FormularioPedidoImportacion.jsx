@@ -2,61 +2,56 @@
 import { useState } from 'react';
 import './FormularioPedido.css';
 
+// Definimos la estructura de datos para los desplegables dinámicos
+const familias = {
+  GOMA: ['6mm', '8mm', '10mm', '12mm', '15mm'],
+  PVC: ['Blanco2mm', 'Blanco3mm', 'Verde2mm', 'Verde3mm', 'Azul2mm', 'Azul3mm'],
+  FIELTRO: ['Fieltro10', 'Fieltro15'],
+  CARAMELO: ['6mm', '8mm', '10mm', '12mm'],
+  VERDE: ['6mm', '8mm', '10mm', '12mm'],
+  NEGRA: ['6mm', '8mm', '10mm', '12mm'],
+};
+
 function FormularioPedidoImportacion() {
-  const [materialTipo, setMaterialTipo] = useState('GOMA'); // GOMA, PVC, FIELTRO
-  const [valorConversion, setValorConversion] = useState(''); // Ej: 1.1 para USD a EUR
+  const [familiaSeleccionada, setFamiliaSeleccionada] = useState('GOMA');
 
   const [pedido, setPedido] = useState({
     numero_factura: '',
     proveedor: '',
     fecha_pedido: new Date().toISOString().split('T')[0],
-    fecha_llegada: '',
     observaciones: '',
+    valor_conversion: '',
   });
 
+  // El estado de las líneas ahora contiene las propiedades de la bobina
   const [lineas, setLineas] = useState([
     {
-      temp_id: Date.now(),
-      subtipo_material: '',
-      referencia_stock: '',
+      id: Date.now(),
+      referencia_bobina: '', // Identificador único de la bobina
       espesor: '',
       ancho: '',
-      color: '',
-      cantidad_original: '',
-      precio_unitario_original: '', // Puede ser en moneda extranjera
-      moneda_original: 'USD', // Moneda por defecto para importación
-      unidad_medida: 'm',
+      largo: '', // Renombrado de cantidad_original a largo
+      peso_por_metro: '',
+      precio_unitario_original: '',
+      moneda_original: 'USD',
       ubicacion: '',
-      notas_linea: '',
-      peso_total_kg: '' // NUEVO CAMPO
     }
   ]);
 
-  const [gastos, setGastos] = useState([
-    {
-      temp_id: Date.now(),
-      tipo_gasto: 'SUPLIDOS', // SUPLIDOS, EXENTO, SUJETO
-      descripcion: '',
-      coste_eur: '' // Asumimos que los gastos se introducen en EUR
-    }
-  ]);
-
+  const [gastos, setGastos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
 
-  // Handlers (handlePedidoChange, handleLineaChange, handleGastoChange, add/removeLinea, add/removeGasto)
-  // son muy similares a FormularioPedidoNacional, puedes copiarlos y adaptarlos ligeramente si es necesario.
-  // Aquí los incluyo para completitud:
   const handlePedidoChange = (e) => {
     setPedido(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleLineaChange = (index, e) => {
+  const handleLineaChange = (id, e) => {
     const { name, value } = e.target;
-    const nuevasLineas = [...lineas];
-    nuevasLineas[index][name] = value;
-    setLineas(nuevasLineas);
+    setLineas(prevLineas => prevLineas.map(linea =>
+      linea.id === id ? { ...linea, [name]: value } : linea
+    ));
   };
   
   const handleGastoChange = (index, e) => {
@@ -68,22 +63,19 @@ function FormularioPedidoImportacion() {
 
   const addLinea = () => {
     setLineas(prev => [...prev, {
-      temp_id: Date.now(),
-      subtipo_material: '', referencia_stock: '', espesor: '', ancho: '', color: '',
-      cantidad_original: '', precio_unitario_original: '', moneda_original: 'USD', unidad_medida: 'm',
-      ubicacion: '', notas_linea: '', peso_total_kg: '' // NUEVO CAMPO
+      id: Date.now(), referencia_bobina: '', espesor: '', ancho: '', largo: '',
+      peso_por_metro: '', precio_unitario_original: '', moneda_original: 'USD', ubicacion: ''
     }]);
   };
 
-  const removeLinea = (index) => {
-    if (lineas.length <= 1) return;
-    setLineas(prev => prev.filter((_, i) => i !== index));
+  const removeLinea = (id) => {
+    if (lineas.length > 1) {
+      setLineas(prev => prev.filter(linea => linea.id !== id));
+    }
   };
 
   const addGasto = () => {
-    setGastos(prev => [...prev, {
-      temp_id: Date.now(), tipo_gasto: 'SUPLIDOS', descripcion: '', coste_eur: ''
-    }]);
+    setGastos(prev => [...prev, { temp_id: Date.now(), tipo_gasto: 'SUPLIDOS', descripcion: '', coste_eur: '' }]);
   };
 
   const removeGasto = (index) => {
@@ -94,26 +86,22 @@ function FormularioPedidoImportacion() {
     e.preventDefault();
     setLoading(true); setError(null); setSuccessMessage('');
 
-    if (!valorConversion || isNaN(parseFloat(valorConversion)) || parseFloat(valorConversion) <= 0) {
-        setError("El valor de conversión es obligatorio y debe ser un número positivo.");
-        setLoading(false); return;
-    }
-    if (lineas.some(l => !l.referencia_stock.trim())) {
-        setError("Todas las líneas deben tener una referencia de stock.");
-        setLoading(false); return;
-    }
-    // Puedes añadir más validaciones aquí si es necesario
-    // Por ejemplo, que peso_total_kg sea un número positivo
+    // Pre-cálculo del porcentaje de gastos para enviar al backend
+    const totalGastos = gastos.reduce((acc, g) => acc + (parseFloat(g.coste_eur) || 0), 0);
+    const totalMateriales = lineas.reduce((acc, l) => acc + ((parseFloat(l.largo) || 0) * (parseFloat(l.precio_unitario_original) || 0)), 0);
+    const porcentajeGastos = totalMateriales > 0 ? totalGastos / totalMateriales : 0;
 
-    const lineasParaEnviar = lineas.map(({ temp_id, ...rest }) => rest);
-    const gastosParaEnviar = gastos.map(({ temp_id, ...rest }) => rest);
+    const lineasParaEnviar = lineas.map(l => ({
+        ...l,
+        // Renombramos 'largo' a 'cantidad_original' para el backend
+        cantidad_original: parseFloat(l.largo) || 0, 
+    }));
 
     const payload = {
-      pedido,
+      pedido: { ...pedido, porcentajeGastos }, // Enviamos el porcentaje precalculado
       lineas: lineasParaEnviar,
-      gastos: gastosParaEnviar,
-      material_tipo: materialTipo,
-      valor_conversion: parseFloat(valorConversion)
+      gastos: gastos,
+      material_tipo_general: familiaSeleccionada
     };
 
     try {
@@ -124,8 +112,8 @@ function FormularioPedidoImportacion() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || data.detalle || `Error del servidor`);
-      setSuccessMessage(`¡Pedido de Importación de ${materialTipo} (ID: ${data.pedidoId}) creado con éxito!`);
-      // Opcional: resetear formulario después de éxito
+      setSuccessMessage(`¡Pedido de Importación (ID: ${data.pedidoId}) creado con éxito!`);
+      // Resetear formulario
     } catch (err) {
       setError(err.message);
     } finally {
@@ -144,79 +132,54 @@ function FormularioPedidoImportacion() {
           <legend>Datos del Pedido</legend>
           <div className="form-grid">
             <div>
-              <label htmlFor="materialTipoImport">Material Principal:</label>
-              <select id="materialTipoImport" value={materialTipo} onChange={(e) => setMaterialTipo(e.target.value)}>
-                <option value="GOMA">GOMA</option>
-                <option value="PVC">PVC</option>
-                <option value="FIELTRO">FIELTRO</option>
-                <option value="VERDE">VERDE</option>
-                <option value="CARAMELO">CARAMELO</option>
-
-
+              <label htmlFor="familiaSelect">Familia del Contenedor:</label>
+              <select id="familiaSelect" value={familiaSeleccionada} onChange={(e) => setFamiliaSeleccionada(e.target.value)}>
+                {Object.keys(familias).map(fam => <option key={fam} value={fam}>{fam}</option>)}
               </select>
             </div>
              <div>
               <label htmlFor="valorConversion">Valor Conversión (a EUR):</label>
-              <input 
-                type="number" 
-                step="0.0001" 
-                id="valorConversion" 
-                name="valorConversion"
-                value={valorConversion} 
-                onChange={(e) => setValorConversion(e.target.value)} 
-                placeholder="Ej: 1.08 (si 1 USD = 1.08 EUR)"
-                required 
-              />
+              <input type="number" step="0.0001" id="valorConversion" name="valor_conversion" value={pedido.valor_conversion} onChange={handlePedidoChange} required />
             </div>
             <label>Nº Factura: <input type="text" name="numero_factura" value={pedido.numero_factura} onChange={handlePedidoChange} required /></label>
             <label>Proveedor: <input type="text" name="proveedor" value={pedido.proveedor} onChange={handlePedidoChange} /></label>
             <label>Fecha Pedido: <input type="date" name="fecha_pedido" value={pedido.fecha_pedido} onChange={handlePedidoChange} required /></label>
           </div>
-          <label>Observaciones: <textarea name="observaciones" value={pedido.observaciones} onChange={handlePedidoChange}></textarea></label>
         </fieldset>
 
-        <h3>Bobinas ({materialTipo})</h3>
-        {lineas.map((linea, index) => (
-          <fieldset key={linea.temp_id} className="linea-item">
-            <legend>Línea {index + 1}</legend>
-            <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))'}}>
-              <label>Ref(8+3, Fieltro15, B3): <input type="text" name="referencia_stock" value={linea.referencia_stock} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Espesor(6mm, F15, 3mm): <input type="text" name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(index, e)} /></label>
-              <label>Ancho (mm): <input type="number" name="ancho" value={linea.ancho} onChange={(e) => handleLineaChange(index, e)} /></label>
-              <label>Color(Para el PVC): <input type="text" name="color" value={linea.color} onChange={(e) => handleLineaChange(index, e)} /></label>
-              <label>Cantidad ({linea.unidad_medida})*: <input type="number" step="0.01" name="cantidad_original" value={linea.cantidad_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Moneda Lín.:
-                <select name="moneda_original" value={linea.moneda_original} onChange={(e) => handleLineaChange(index, e)}>
-                  <option value="USD">USD</option>
-                  <option value="EUR">EUR</option>
+        <h3>Líneas del Pedido (Bobinas)</h3>
+        {lineas.map((linea) => (
+          <fieldset key={linea.id} className="linea-item">
+            <legend>Bobina</legend>
+            <div className="form-grid-lineas" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))'}}>
+              <label>Referencia Bobina*: <input type="text" name="referencia_bobina" value={linea.referencia_bobina} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Tipo/Espesor*:
+                <select name="espesor" value={linea.espesor} onChange={(e) => handleLineaChange(linea.id, e)} required>
+                    <option value="">-- Selecciona --</option>
+                    {familias[familiaSeleccionada].map(subtipo => <option key={subtipo} value={subtipo}>{subtipo}</option>)}
                 </select>
               </label>
-              <label>Precio Unit. ({linea.moneda_original}/{linea.unidad_medida})*: <input type="number" step="0.0001" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(index, e)} required /></label>
-              <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(index, e)} /></label>
-              <label>Peso Total (kg): <input type="number" step="0.01" name="peso_total_kg" value={linea.peso_total_kg} onChange={(e) => handleLineaChange(index, e)} placeholder="Peso de esta bobina/lote" /></label> {/* NUEVO CAMPO */}
+              <label>Ancho (mm)*: <input type="number" name="ancho" value={linea.ancho} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Largo (m)*: <input type="number" step="0.01" name="largo" value={linea.largo} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Peso (kg/m): <input type="number" step="0.01" name="peso_por_metro" value={linea.peso_por_metro} onChange={(e) => handleLineaChange(linea.id, e)} /></label>
+              <label>Precio Unit. ({linea.moneda_original}/m)*: <input type="number" step="0.0001" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
+              <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(linea.id, e)} /></label>
             </div>
-            <label>Comentarios: <textarea name="notas_linea" value={linea.notas_linea} onChange={(e) => handleLineaChange(index, e)}></textarea></label>
-            {lineas.length > 1 && <button type="button" onClick={() => removeLinea(index)} className="remove-btn">Eliminar</button>}
+            <button type="button" onClick={() => removeLinea(linea.id)} className="remove-btn">Eliminar Bobina</button>
           </fieldset>
         ))}
-        <button type="button" onClick={addLinea} className="add-btn">Añadir Línea</button>
+        <button type="button" onClick={addLinea} className="add-btn">Añadir Bobina</button>
 
-        <h3>Gastos del Pedido (Importación)</h3>
+        {/* La sección de GASTOS se mantiene igual que antes */}
+        <h3>Gastos del Pedido</h3>
         {gastos.map((gasto, index) => (
           <fieldset key={gasto.temp_id} className="gasto-item">
             <legend>Gasto {index + 1}</legend>
             <div className="form-grid-gastos">
-              <label>Tipo Gasto:
-                <select name="tipo_gasto" value={gasto.tipo_gasto} onChange={(e) => handleGastoChange(index, e)}>
-                  <option value="SUPLIDOS">SUPLIDOS</option>
-                  <option value="EXENTO">EXENTO</option>
-                  <option value="SUJETO">SUJETO</option>
-                </select>
-              </label>
               <label>Descripción: <input type="text" name="descripcion" value={gasto.descripcion} onChange={(e) => handleGastoChange(index, e)} required /></label>
-              <label>Coste (EUR)*: <input type="number" step="0.01" name="coste_eur" value={gasto.coste_eur} onChange={(e) => handleGastoChange(index, e)} placeholder="Coste en EUR" required /></label>
+              <label>Coste (€): <input type="number" step="0.01" name="coste_eur" value={gasto.coste_eur} onChange={(e) => handleGastoChange(index, e)} required /></label>
             </div>
-            <button type="button" onClick={() => removeGasto(index)} className="remove-btn">Eliminar</button>
+            {gastos.length > 0 && <button type="button" onClick={() => removeGasto(index)} className="remove-btn">Eliminar Gasto</button>}
           </fieldset>
         ))}
         <button type="button" onClick={addGasto} className="add-btn">Añadir Gasto</button>

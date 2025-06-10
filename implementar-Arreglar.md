@@ -1,48 +1,107 @@
 Cosas a arreglar:
 
 Ver Stock:
-- Poner las cabeceras acordes a las palabras que yo quiero, quitar sku por ejemplo y cambiarlo por referencia, poner ancho, largo, espesor...
-- Poner en las familias todos los materiales que tenemos, GOMA, FIELTRO, VERDE, CARAMELO, PVC
-- Terminar de arreglar el formulario de pedidos
-- En los detalles poner tambien el resto de datos, es importante tener tanto el ancho como el largo, espesor de la bobina
 
 Ver Pedidos:
--Poner todos los datos de las bobinas, ancho, largo, espesor, asi como todos los datos de la bobina, y poner todos los gastos tambien detallados dentro del perfil del detalle del pedido, asi como sus datos corresopndientes
+-Me gustaría poder ver cuando veo una bobina de un pedido viendo los detalles del pedido el precio al que compré el metro lineal del material, y al lado, en un segundo apartado, el precio del metro lineal mas el porcentaje de gastos aplicados
+-También hay que cambiar el color de las cabeceras de los datos, es demasiado claro, podriamos ponerle un verde mas oscuro
+-Viendo los pedidos, hay que quitar el filtro de Fecha Pedido Hasta:
+-Tambien hay que quitar la cabecera de Fecha Llegada, ya que no pasamos ese datos
 
 Ver Tarifa Venta:
-Node.js: GET /api/tarifa-venta para MATERIALES EN STOCK, tipo: final
-Error en /api/tarifa-venta (materiales): consultarStockMateriasPrimas is not defined
+La tarifa de venta funciona bien, pero quiero que se vean otros datos, vamos a quitar la descripcion material, y la unidad, 
+y vamos a meter ahi en la cabecera, el espesor y el ancho
 
 Nuevo Pedido Nacional/Importacion
--Eliminar la fecha de llegada del pedido, tambien podemos borrarla del database
--Lo de seleccionar de un desplegable el artidulo(materia prima), eso no me funciona, salvo que, hagamos una tabla nueva con dichas referencias previas, por ejemplo, podemos ponder de primeras un desplegable para seleccionar el tipo de contenedor(GOMA, PVC, CARAMELO, VERDE, FIELTROM, NEGRA(teniendo en cuenta que a veces segun nos cuadren los numeros para rellenar el contenedor, entonces tenedremos que poder seleccionar o un tipo de contenedor, o poder hacer como contenedores mixtos, y segun el tipo de familia de materiales que seleccionemos, pues nos dejen elegir esas referencias))
-FAMILIAS(GOMA, PVC, CARAMELO, VERDE, FIELTRO, NEGRA), ten en cuenta que quizá en un futuro debemos de añadir nuevas familias
-GOMA(6mm, 8mm, 10mm, 12mm, 15mm) 
-PVC(Blanco2mm, Blanco3mm, Verde2mm, Verde3mm, Azul2mm, Azul3mm)
-FIELTRO(Fieltro10, Fieltro15)
-CARAMELO(6mm, 8mm, 10mm, 12mm)
-VERDE(6mm, 8mm, 10mm, 12mm)
-NEGRA(6mm, 8mm, 10mm, 12mm)
+-Vamos a quitar Ubicación, eso no lo voy a usar realmente, o al menos no en principio, asi que podemos comentarlo en el codigo y si en un futuro lo necesito, lo descomento
+-Debe dejar ponerme el numero de bobinas del mismo tipo que estoy dando de alta
+-En el pedido de importacion, tiene que dejarme elegir si los gastos son suplidos, exentos, o sujetos
+
+-Da este error en el terminal al crear un pedido de importacion: 
+Servidor Node.js API escuchando en http://localhost:5002
+Conectado a la base de datos SQLite.
+Verificando/Creando tablas con la nueva estructura normalizada...
+Verificación/Creación de tablas completada.
+Foreign keys habilitadas.
+Tabla 'Stock' verificada/creada.
+Node.js: Solicitud a GET /api/stock (con nueva estructura)
+Node.js: Solicitud a GET /api/stock (con nueva estructura)
+Node.js: Devolviendo 4 lotes de stock.
+Node.js: Devolviendo 4 lotes de stock.
+Node.js: Se ha solicitado GET /api/pedidos
+Node.js: Filtros recibidos en /api/pedidos: [Object: null prototype] {}
+Node.js: Se ha solicitado GET /api/pedidos
+Node.js: Filtros recibidos en /api/pedidos: [Object: null prototype] {}
+Node.js: Devolviendo 4 pedidos.
+Node.js: Devolviendo 4 pedidos.
+Node.js: POST /api/pedidos-nacionales, Material: CARAMELO
+Node.js: Pedido NACIONAL de CARAMELO creado con ID: 5
+Node.js: Se ha solicitado GET /api/pedidos
+Node.js: Filtros recibidos en /api/pedidos: [Object: null prototype] {}
+Node.js: Devolviendo 5 pedidos.
+Node.js: Se ha solicitado GET /api/pedidos
+Node.js: Filtros recibidos en /api/pedidos: [Object: null prototype] {}
+Node.js: Devolviendo 5 pedidos.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: Se ha solicitado GET /api/pedidos/5/detalles
+Node.js: Devolviendo detalles para el pedido ID 5.
+Node.js: GET /api/tarifa-venta para MATERIALES EN STOCK, tipo: fabricante
+Tarifa de venta de MATERIALES generada para tipo_tarifa: fabricante
+Node.js: POST /api/pedidos-importacion, Material: FIELTRO, Conv: 0.92
+Error ejecutando SQL (transacción run): INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, ubicacion, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?, ?) [
+  10,
+  'FIELTRO 15',
+  15,
+  15,
+  29.02409448818898,
+  'NAVE DE ARRIBA',
+  6,
+  '2025-06-10'
+] SQLITE_CONSTRAINT: UNIQUE constraint failed: Stock.lote
+Error en la transacción de procesarNuevoPedido: [Error: SQLITE_CONSTRAINT: UNIQUE constraint failed: Stock.lote] {
+  errno: 19,
+  code: 'SQLITE_CONSTRAINT'
+}
+Error en POST /api/pedidos-importacion (FIELTRO): SQLITE_CONSTRAINT: UNIQUE constraint failed: Stock.lote
 
 
-y dentro de esta linea, nos deje añadirle a cada bobina los siguientes detalles
-Su identificador autoincrementable que no toca el usuario, pero lo realiza el programa automaticamente como clave primaria,
-Referencia, Ancho, Largo, Rollos, Peso por metro, 
-y bueno claro, tambien  el USD/m en case de pedidos de importacion, y en EUR/m en caso de los pedidos nacionales
-no olvidar de la ubicacion 
+Gestión de artículos:
+-Al crear una plantilla no necesito eso de coste material estimado, eso no hace falta
+-Da este error al crear una plantilla nueva: Node.js: Se ha solicitado GET /api/materiales-genericos
+Node.js: GET /api/productos-terminados [Object: null prototype] {}
+Node.js: Solicitud de cálculo de coste temporal para Material: Fieltro, Espesor: F15, Ancho Prod: 550, Largo Prod: 5
+No se encontró materia prima en stock para Fieltro con espesor F15.
+Node.js: Solicitud de cálculo de coste temporal para Material: Fieltro, Espesor: F15, Ancho Prod: 550, Largo Prod: 50
+No se encontró materia prima en stock para Fieltro con espesor F15.
+Node.js: Solicitud de cálculo de coste temporal para Material: Fieltro, Espesor: F15, Ancho Prod: 550, Largo Prod: 500
+No se encontró materia prima en stock para Fieltro con espesor F15.
+Node.js: POST /api/productos-terminados, datos recibidos: {
+  nombre: 'FALDETA ALDAMA FIELTRO',
+  unidad_medida: 'unidad',
+  coste_fabricacion_estandar: 75,
+  material_principal: 'Fieltro',
+  espesor_principal: 'F15',
+  ancho_final: 550,
+  largo_final: 500,
+  status: 'ACTIVO'
+}
+Error en POST /api/productos-terminados: Cannot destructure property 'nombre' of 'productoData' as it is undefined.
+
+-En material principal, debe dejarme seleccionar cualquier material que tenga en el almacen(familia), con su espesor correspondiente 
 
 
-
-
--No se calcula el coste estandar de los productos, probablemente porque no encuentra el material buscado en la tarifa
-
-
--Eliminar el coste de adquisición de la maquinaria
-
--EN los procesos, vamos a calcular lo que se tarda en segundos o quizá en minutos, por ejemplo, yo tardo 30 segundos en realizar una faldeta de goma de 6mm de aldama en la prensa hidraulica, y luego tardo unos 20 segundos en grabarlo en laser, entonces tambien debe de dejarme ponerle en el proceso varias maquinas, ya que pueden intervenir varias, y poder poner sus tiempos correspondientes
-
--Cuando creo una orden de produccion no pone el apartado de coste real, probablemente porque no encuentra los materiales en el almacen, ya que lo que tenemos en seed_database no son datos reales, te voy a poner datos de ejemplo para que te inventes datos reales a continucacion.
-
--Stock productos finales no es necesario, no vamos a manejar stock de esa forma
-
--Poner bonito Ver Stock
+Gestión de procesos y ordenes de produccion, hay que darle una vuelta a eso, quiero que funcione de otra forma,
+quiero las dos cosas juntas realmente, dame ideas para hacerlo lo mas completo posible en un solo apartado

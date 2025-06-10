@@ -9,7 +9,6 @@ import GestionProductosRecetas from './components/GestionProductosRecetas.jsx';
 import GestionMaquinaria from './components/GestionMaquinaria.jsx';
 import GestionProcesosFabricacion from './components/GestionProcesosFabricacion.jsx';
 import GestionOrdenesProduccion from './components/GestionOrdenesProduccion.jsx';
-import GestionStockProductosTerminados from './components/GestionStockProductosTerminados.jsx';
 import FormularioConfiguracion from './components/FormularioConfiguracion.jsx';
 import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
 
@@ -17,14 +16,18 @@ import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
 function DetalleStockModal({ item, onClose }) {
   if (!item) return null;
 
-  return (
+   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h2>Detalles del Lote: {item.lote} (SKU: {item.sku})</h2>
+        <h2>Detalles del Lote: {item.lote} (Ref: {item.sku})</h2>
         <div className="modal-details-grid">
-            <p><strong>SKU:</strong> {item.sku || 'N/A'}</p>
+            <p><strong>Referencia:</strong> {item.sku || 'N/A'}</p>
             <p><strong>Descripción:</strong> {item.descripcion || 'N/A'}</p>
             <p><strong>Familia:</strong> {item.familia || 'N/A'}</p>
+            {/* --- CAMPOS AÑADIDOS --- */}
+            <p><strong>Espesor:</strong> {item.espesor || 'N/A'}</p>
+            <p><strong>Ancho:</strong> {item.ancho ? `${item.ancho} mm` : 'N/A'}</p>
+            {/* --- FIN DE CAMPOS AÑADIDOS --- */}
             <p><strong>Lote:</strong> {item.lote || 'N/A'}</p>
             <p><strong>Cantidad Actual:</strong> {parseFloat(item.cantidad_actual || 0).toFixed(2)} {item.unidad_medida}</p>
             <p><strong>Coste del Lote:</strong> {parseFloat(item.coste_lote || 0).toFixed(4)} €/{item.unidad_medida}</p>
@@ -97,7 +100,6 @@ function App() {
       case 'MAQUINARIA': return <GestionMaquinaria />;
       case 'PROCESOS_FABRICACION': return <GestionProcesosFabricacion />;
       case 'ORDENES_PRODUCCION': return <GestionOrdenesProduccion />;
-      case 'STOCK_PRODUCTOS_TERMINADOS': return <GestionStockProductosTerminados />;
       case 'CONFIGURACION': return <FormularioConfiguracion />;
       case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
       case 'STOCK':
@@ -105,62 +107,75 @@ function App() {
         if (loadingStock) return <p>Cargando stock...</p>;
         if (errorStock) return <p className="error-backend">Error al cargar lista de stock: {errorStock}</p>;
 
+        // En frontend-react/src/App.jsx
+
+// Reemplazar el return dentro del 'case 'STOCK':' en la función 'renderVista' con esto:
         return (
-          <>
-            <h2>Stock Actual</h2>
-            <div className="filtros-container">
-              <div className="filtro-item">
-                <label htmlFor="filtro-familia">Familia:</label>
-                <select id="filtro-familia" value={filtroFamilia} onChange={(e) => setFiltroFamilia(e.target.value)}>
-                    <option value="">Todas</option>
-                    <option value="GOMA">GOMA</option>
-                    <option value="FIELTRO">FIELTRO</option>
-                </select>
+            <>
+              <h2>Stock Actual</h2>
+              <div className="filtros-container">
+                <div className="filtro-item">
+                  <label htmlFor="filtro-familia">Familia:</label>
+                  {/* CORRECCIÓN: Añadidas todas las familias al filtro */}
+                  <select id="filtro-familia" value={filtroFamilia} onChange={(e) => setFiltroFamilia(e.target.value)}>
+                      <option value="">Todas</option>
+                      <option value="GOMA">GOMA</option>
+                      <option value="FIELTRO">FIELTRO</option>
+                      <option value="PVC">PVC</option>
+                      <option value="VERDE">VERDE</option>
+                      <option value="CARAMELO">CARAMELO</option>
+                      <option value="NEGRA">NEGRA</option>
+                  </select>
+                </div>
+                {/* Podríamos añadir más filtros aquí en el futuro */}
               </div>
-              {/* Podríamos añadir más filtros aquí en el futuro */}
-            </div>
 
-            {stockList.length === 0 && <p>No hay lotes de stock que coincidan con los filtros.</p>}
+              {stockList.length === 0 && <p>No hay lotes de stock que coincidan con los filtros.</p>}
 
-            {stockList.length > 0 && (
-              <table>
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Descripción</th>
-                    <th>Lote</th>
-                    <th>Cantidad Actual</th>
-                    <th>Unidad</th>
-                    <th>Ubicación</th>
-                    <th>Estado</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stockList.map((lote) => (
-                    <tr key={lote.id}>
-                      <td>{lote.sku}</td>
-                      <td>{lote.descripcion}</td>
-                      <td>{lote.lote}</td>
-                      <td>{parseFloat(lote.cantidad_actual || 0).toFixed(2)}</td>
-                      <td>{lote.unidad_medida}</td>
-                      <td>{lote.ubicacion || '-'}</td>
-                      <td>{lote.status}</td>
-                      <td>
-                        <button
-                          className="details-button"
-                          onClick={() => handleVerDetalles(lote)}
-                        >
-                          Detalles
-                        </button>
-                        {/* TODO: Rehabilitar botones de acción cuando el backend esté listo */}
-                      </td>
+              {stockList.length > 0 && (
+                <table>
+                  {/* CORRECCIÓN: Cabeceras de tabla actualizadas */}
+                  <thead>
+                    <tr>
+                      <th>Referencia</th>
+                      <th>Descripción</th>
+                      <th>Espesor</th>
+                      <th>Ancho (mm)</th>
+                      <th>Lote</th>
+                      <th>Cantidad Actual</th>
+                      <th>Unidad</th>
+                      <th>Ubicación</th>
+                      <th>Estado</th>
+                      <th>Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
+                  </thead>
+                  <tbody>
+                    {stockList.map((lote) => (
+                      <tr key={lote.id}>
+                        {/* CORRECCIÓN: Se muestra 'sku' como Referencia y se añaden los nuevos campos */}
+                        <td>{lote.sku}</td>
+                        <td>{lote.descripcion}</td>
+                        <td>{lote.espesor || '-'}</td>
+                        <td>{lote.ancho || '-'}</td>
+                        <td>{lote.lote}</td>
+                        <td>{parseFloat(lote.cantidad_actual || 0).toFixed(2)}</td>
+                        <td>{lote.unidad_medida}</td>
+                        <td>{lote.ubicacion || '-'}</td>
+                        <td>{lote.status}</td>
+                        <td>
+                          <button
+                            className="details-button"
+                            onClick={() => handleVerDetalles(lote)}
+                          >
+                            Detalles
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
         );
     }
   };

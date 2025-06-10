@@ -1,6 +1,6 @@
 // frontend-react/src/components/DetallePedidoModal.jsx
 import { useState, useEffect, useCallback } from 'react';
-import './DetallePedidoModal.css'; // Asegúrate de tener este archivo o los estilos en App.css
+import './DetallePedidoModal.css';
 
 function DetallePedidoModal({ pedidoId, onClose }) {
   const [detallePedido, setDetallePedido] = useState(null);
@@ -38,6 +38,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
     if (!dateString) return 'N/A';
     try {
       const date = new Date(dateString);
+      // Ajuste para asegurar que la fecha se muestre correctamente sin importar la zona horaria del navegador
       const userTimezoneOffset = date.getTimezoneOffset() * 60000;
       const correctedDate = new Date(date.getTime() + userTimezoneOffset);
       return correctedDate.toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -62,18 +63,18 @@ function DetallePedidoModal({ pedidoId, onClose }) {
                 <p><strong>Nº Factura:</strong> {detallePedido.pedidoInfo.numero_factura}</p>
                 <p><strong>Proveedor:</strong> {detallePedido.pedidoInfo.proveedor || '-'}</p>
                 <p><strong>Fecha Pedido:</strong> {formatDate(detallePedido.pedidoInfo.fecha_pedido)}</p>
-                <p><strong>Fecha Llegada:</strong> {formatDate(detallePedido.pedidoInfo.fecha_llegada)}</p>
                 <p><strong>% Gastos sobre Material:</strong> {(detallePedido.porcentajeGastos * 100).toFixed(2)}%</p>
               </div>
             </div>
 
+            {/* --- SECCIÓN DE ITEMS DE STOCK AÑADIDA --- */}
             {detallePedido.stockItems && detallePedido.stockItems.length > 0 && (
               <div className="detalle-pedido-seccion">
-                <h3>Items de Stock Recibidos en este Pedido</h3>
+                <h3>Items de Stock Recibidos</h3>
                 <table className="sub-table">
                   <thead>
                     <tr>
-                      <th>SKU</th>
+                      <th>Referencia (SKU)</th>
                       <th>Descripción</th>
                       <th>Lote</th>
                       <th>Cantidad Recibida</th>
@@ -82,12 +83,37 @@ function DetallePedidoModal({ pedidoId, onClose }) {
                   </thead>
                   <tbody>
                     {detallePedido.stockItems.map(item => (
-                      <tr key={item.id}>
+                      <tr key={`stock-${item.id}`}>
                         <td>{item.sku}</td>
                         <td>{item.descripcion}</td>
                         <td>{item.lote}</td>
                         <td>{parseFloat(item.cantidad_actual).toFixed(2)} {item.unidad_medida}</td>
                         <td>{parseFloat(item.coste_lote).toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* --- SECCIÓN DE GASTOS AÑADIDA --- */}
+            {detallePedido.gastos && detallePedido.gastos.length > 0 && (
+              <div className="detalle-pedido-seccion">
+                <h3>Desglose de Gastos</h3>
+                <table className="sub-table">
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th>Descripción</th>
+                      <th>Coste (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detallePedido.gastos.map(gasto => (
+                      <tr key={`gasto-${gasto.id}`}>
+                        <td>{gasto.tipo_gasto}</td>
+                        <td>{gasto.descripcion}</td>
+                        <td>{parseFloat(gasto.coste_eur).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
