@@ -17,7 +17,7 @@ const {
     eliminarPedidoCompleto,
 
     crearItem,
-    actualizarReferenciaProductoTerminado,
+    consultarFamiliasYEspesores,
     insertarProductoTerminado,
     consultarProductosTerminados,
     consultarProductoTerminadoPorId,
@@ -559,15 +559,14 @@ app.get('/api/tarifa-venta', async (req, res) => {
         }
 
         const tarifaVentaMateriales = materiasPrimasEnStock.map(item => {
-            // Se usan los nuevos nombres de campo: coste_lote y sku.
             const costeBase = parseFloat(item.coste_lote) || 0;
             const precioVenta = costeBase * (1 + margenAplicado);
 
             return {
                 id: item.id,
-                referencia_stock: item.sku, // Campo corregido
-                descripcion: item.descripcion, // Usamos la descripción directa del item
-                unidad_medida: item.unidad_medida,
+                referencia_stock: item.sku,
+                espesor: item.espesor, // <-- AÑADIR
+                ancho: item.ancho,     // <-- AÑADIR
                 coste_metro_lineal: costeBase,
                 margen_aplicado: margenAplicado,
                 precio_venta_metro_lineal: precioVenta
@@ -580,6 +579,19 @@ app.get('/api/tarifa-venta', async (req, res) => {
     } catch (error) {
         console.error("Error en /api/tarifa-venta (materiales):", error.message);
         res.status(500).json({ error: "Error interno al generar la tarifa de venta de materiales.", detalle: error.message });
+    }
+});
+
+
+// AÑADIR este nuevo endpoint en server.js
+app.get('/api/stock/familias-y-espesores', async (req, res) => {
+    console.log('Node.js: GET /api/stock/familias-y-espesores');
+    try {
+        const data = await consultarFamiliasYEspesores();
+        res.json(data);
+    } catch (error) {
+        console.error("Error en GET /api/stock/familias-y-espesores:", error.message);
+        res.status(500).json({ error: "Error interno al obtener familias y espesores.", detalle: error.message });
     }
 });
 
@@ -1109,17 +1121,27 @@ app.delete('/api/ordenes-produccion/:id', async (req, res) => {
 });
 
 // Endpoint para procesar una orden de producción (consumir stock, generar PT)
+// En server.js, busca el endpoint de procesar orden
+// REEMPLAZA el endpoint existente por este:
 app.post('/api/ordenes-produccion/:id/procesar', async (req, res) => {
     const ordenId = parseInt(req.params.id, 10);
+    const { stockAssignments } = req.body; // Recibimos las asignaciones desde el frontend
+
     console.log(`Node.js: POST /api/ordenes-produccion/${ordenId}/procesar`);
     if (isNaN(ordenId)) {
         return res.status(400).json({ error: "ID de orden de producción no válido." });
     }
+    if (!stockAssignments || !Array.isArray(stockAssignments) || stockAssignments.length === 0) {
+        return res.status(400).json({ error: "Se requiere la asignación de lotes de stock." });
+    }
+
     try {
-        const resultado = await procesarOrdenProduccion(ordenId, appConfig);
+        // Pasamos las asignaciones a la función de lógica de negocio
+        const resultado = await procesarOrdenProduccion(ordenId, stockAssignments, appConfig);
         res.json({ mensaje: "Orden de producción procesada con éxito.", ...resultado });
     } catch (error) {
         console.error(`Error en POST /api/ordenes-produccion/${ordenId}/procesar:`, error.message);
+        // Devolvemos el mensaje de error específico (ej. "Stock insuficiente...")
         res.status(500).json({ error: "Error al procesar la orden de producción.", detalle: error.message });
     }
 });

@@ -98,8 +98,7 @@ function App() {
       case 'TARIFA_VENTA': return <TarifaVenta />;
       case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
       case 'MAQUINARIA': return <GestionMaquinaria />;
-      case 'PROCESOS_FABRICACION': return <GestionProcesosFabricacion />;
-      case 'ORDENES_PRODUCCION': return <GestionOrdenesProduccion />;
+      case 'PRODUCCION': return <GestionProduccion />; // NUEVO
       case 'CONFIGURACION': return <FormularioConfiguracion />;
       case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
       case 'STOCK':
@@ -193,12 +192,11 @@ function App() {
             <button onClick={() => setVistaActual('IMPORTACION')} disabled={vistaActual === 'IMPORTACION'}>Nuevo Pedido Importación</button>
         </div>
         <div className="sidebar-section">
-            <h3>Fabricación</h3>
-            <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
-            <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
-            <button onClick={() => setVistaActual('PROCESOS_FABRICACION')} disabled={vistaActual === 'PROCESOS_FABRICACION'}>Gestión Procesos</button>
-            <button onClick={() => setVistaActual('ORDENES_PRODUCCION')} disabled={vistaActual === 'ORDENES_PRODUCCION'}>Órdenes Producción</button>
-        </div>
+     <h3>Fabricación</h3>
+     <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
+     <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
+     <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Producción</button>
+ </div>
         <div className="sidebar-section">
             <h3>Herramientas</h3>
             <button onClick={() => setVistaActual('CALCULADORA_PRESUPUESTOS')} disabled={vistaActual === 'CALCULADORA_PRESUPUESTOS'}>Calculadora Presupuestos</button>

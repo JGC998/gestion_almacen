@@ -1,6 +1,7 @@
 // frontend-react/src/components/GestionOrdenesProduccion.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import '../App.css'; // Reutiliza estilos generales de App.css
+import GestionProduccion from './GestionProduccion.jsx';
 
 function GestionOrdenesProduccion() {
   const [ordenes, setOrdenes] = useState([]);

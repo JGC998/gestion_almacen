@@ -27,14 +27,14 @@ function FormularioPedidoImportacion() {
   const [lineas, setLineas] = useState([
     {
       id: Date.now(),
-      referencia_bobina: '', // Identificador único de la bobina
+      referencia_bobina: '',
       espesor: '',
       ancho: '',
-      largo: '', // Renombrado de cantidad_original a largo
+      largo: '',
+      numero_bobinas: 1, // <-- AÑADIR (valor por defecto 1)
       peso_por_metro: '',
       precio_unitario_original: '',
-      moneda_original: 'USD',
-      ubicacion: '',
+      moneda_original: 'USD', // (Solo en Importacion)
     }
   ]);
 
@@ -64,7 +64,9 @@ function FormularioPedidoImportacion() {
   const addLinea = () => {
     setLineas(prev => [...prev, {
       id: Date.now(), referencia_bobina: '', espesor: '', ancho: '', largo: '',
-      peso_por_metro: '', precio_unitario_original: '', moneda_original: 'USD', ubicacion: ''
+      numero_bobinas: 1, // <-- AÑADIR
+      peso_por_metro: '', precio_unitario_original: '',
+      moneda_original: 'USD', // (Solo en Importacion)
     }]);
   };
 
@@ -75,8 +77,9 @@ function FormularioPedidoImportacion() {
   };
 
   const addGasto = () => {
+    // Inicializamos con tipo_gasto: 'SUPLIDOS'
     setGastos(prev => [...prev, { temp_id: Date.now(), tipo_gasto: 'SUPLIDOS', descripcion: '', coste_eur: '' }]);
-  };
+};
 
   const removeGasto = (index) => {
     setGastos(prev => prev.filter((_, i) => i !== index));
@@ -163,8 +166,8 @@ function FormularioPedidoImportacion() {
               <label>Largo (m)*: <input type="number" step="0.01" name="largo" value={linea.largo} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
               <label>Peso (kg/m): <input type="number" step="0.01" name="peso_por_metro" value={linea.peso_por_metro} onChange={(e) => handleLineaChange(linea.id, e)} /></label>
               <label>Precio Unit. ({linea.moneda_original}/m)*: <input type="number" step="0.0001" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
-              <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(linea.id, e)} /></label>
-            </div>
+              <label>Nº Bobinas*: <input type="number" name="numero_bobinas" value={linea.numero_bobinas} onChange={(e) => handleLineaChange(linea.id, e)} required min="1" step="1" /></label>
+{/* <label>Ubicación: <input type="text" name="ubicacion" value={linea.ubicacion} onChange={(e) => handleLineaChange(linea.id, e)} /></label> */}            </div>
             <button type="button" onClick={() => removeLinea(linea.id)} className="remove-btn">Eliminar Bobina</button>
           </fieldset>
         ))}
@@ -175,9 +178,16 @@ function FormularioPedidoImportacion() {
         {gastos.map((gasto, index) => (
           <fieldset key={gasto.temp_id} className="gasto-item">
             <legend>Gasto {index + 1}</legend>
-            <div className="form-grid-gastos">
-              <label>Descripción: <input type="text" name="descripcion" value={gasto.descripcion} onChange={(e) => handleGastoChange(index, e)} required /></label>
-              <label>Coste (€): <input type="number" step="0.01" name="coste_eur" value={gasto.coste_eur} onChange={(e) => handleGastoChange(index, e)} required /></label>
+            <div className="form-grid-gastos" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                <label>Tipo de Gasto:
+                    <select name="tipo_gasto" value={gasto.tipo_gasto} onChange={(e) => handleGastoChange(index, e)}>
+                        <option value="SUPLIDOS">Suplidos</option>
+                        <option value="EXENTO">Exento</option>
+                        <option value="SUJETO">Sujeto a IVA</option>
+                    </select>
+                </label>
+                <label>Descripción: <input type="text" name="descripcion" value={gasto.descripcion} onChange={(e) => handleGastoChange(index, e)} required /></label>
+                <label>Coste (€): <input type="number" step="0.01" name="coste_eur" value={gasto.coste_eur} onChange={(e) => handleGastoChange(index, e)} required /></label>
             </div>
             {gastos.length > 0 && <button type="button" onClick={() => removeGasto(index)} className="remove-btn">Eliminar Gasto</button>}
           </fieldset>

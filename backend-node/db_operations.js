@@ -337,7 +337,6 @@ async function findOrCreateItem(dbInstance, linea, familia) {
 
 // REEMPLAZAR la función 'procesarNuevoPedido' existente por esta nueva versión
 async function procesarNuevoPedido(datosCompletosPedido) {
-    // La firma de la función ahora incluye 'material_tipo_general'
     const { pedido, lineas, gastos, material_tipo_general } = datosCompletosPedido;
     const db = conectarDB();
 
@@ -356,26 +355,32 @@ async function procesarNuevoPedido(datosCompletosPedido) {
         }
 
         for (const linea of lineas) {
-            // Usamos la nueva función para obtener el item_id, creándolo si es necesario
             const itemId = await findOrCreateItem(db, linea, material_tipo_general);
 
             await insertarLineaPedido(db, {
                 ...linea,
-                item_id: itemId, // Usamos el ID encontrado o recién creado
+                item_id: itemId,
                 pedido_id: pedidoId
             });
             
-            // La lógica de cálculo de costes y creación de stock sigue siendo similar
             const costeUnitarioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-            const costeFinalConGastos = costeUnitarioOriginal * (1 + (pedido.porcentajeGastos || 0)); // Asumimos que el porcentaje de gastos se puede calcular antes
+            const costeFinalConGastos = costeUnitarioOriginal * (1 + (pedido.porcentajeGastos || 0));
             
-            // La referencia de la línea ahora es el identificador único de la bobina
-            const lote = linea.referencia_bobina || `LOTE-${pedido.numero_factura}-${itemId}`;
+            // --- INICIO DE LA NUEVA LÓGICA ---
+            const numeroDeBobinas = parseInt(linea.numero_bobinas, 10) || 1;
 
-            await runAsync(db,
-                `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, ubicacion, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [itemId, lote, linea.cantidad_original, linea.cantidad_original, costeFinalConGastos, linea.ubicacion, pedidoId, pedido.fecha_pedido]
-            );
+            for (let i = 1; i <= numeroDeBobinas; i++) {
+                // Generamos un lote único para CADA bobina, añadiendo un sufijo numérico si hay más de una.
+                const sufijoUnico = numeroDeBobinas > 1 ? `-${i}` : '';
+                const proveedorLimpio = (pedido.proveedor || 'SIN-PROV').trim().toUpperCase().replace(/\s+/g, '-');
+                const lote = `${proveedorLimpio}-${(linea.referencia_bobina || 'SIN-REF').trim().replace(/\s+/g, '-')}-P${pedidoId}-I${itemId}${sufijoUnico}`;
+
+                await runAsync(db,
+                    `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, ubicacion, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [itemId, lote, linea.cantidad_original, linea.cantidad_original, costeFinalConGastos, linea.ubicacion || null, pedidoId, pedido.fecha_pedido]
+                );
+            }
+            // --- FIN DE LA NUEVA LÓGICA ---
         }
 
         await runAsync(db, 'COMMIT;');
@@ -436,11 +441,21 @@ async function consultarGastosPorPedidoId(dbInstance, pedidoId) {
 
 
 
+// REEMPLAZA la función 'consultarLineasPedidoPorPedidoId' existente
 async function consultarLineasPedidoPorPedidoId(dbInstance, pedidoId) {
-    return allAsync(dbInstance, `SELECT cantidad_original, precio_unitario_original, moneda_original FROM LineasPedido WHERE pedido_id = ?`, [pedidoId]);
+    // Unimos con la tabla Items para obtener la descripción
+    const sql = `
+        SELECT 
+            lp.cantidad_original, 
+            lp.precio_unitario_original, 
+            lp.moneda_original,
+            i.descripcion
+        FROM LineasPedido lp
+        JOIN Items i ON lp.item_id = i.id
+        WHERE lp.pedido_id = ?
+    `;
+    return allAsync(dbInstance, sql, [pedidoId]);
 }
-
-
 // En backend-node/db_operations.js
 
 async function consultarStockPorPedidoId(dbInstance, pedidoId) {
@@ -460,6 +475,7 @@ async function consultarStockPorPedidoId(dbInstance, pedidoId) {
         ORDER BY s.id`, [pedidoId]);
 }
 
+// REEMPLAZA la función 'obtenerDetallesCompletosPedido' existente
 async function obtenerDetallesCompletosPedido(pedidoId) {
     const db = conectarDB();
     try {
@@ -468,16 +484,23 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
             return null;
         }
 
-        const [gastos, stockItems, lineasPedidoOriginales] = await Promise.all([
+        const [gastos, stockItems, lineasPedido] = await Promise.all([
             consultarGastosPorPedidoId(db, pedidoId),
-            consultarStockPorPedidoId(db, pedidoId), // Usamos la nueva función aquí
+            consultarStockPorPedidoId(db, pedidoId),
             consultarLineasPedidoPorPedidoId(db, pedidoId)
         ]);
-        
-        let costeTotalPedidoSinGastosEnMonedaOriginal = 0;
-        // La lógica para calcular el porcentaje de gastos sigue siendo válida
-        lineasPedidoOriginales.forEach(linea => {
-            costeTotalPedidoSinGastosEnMonedaOriginal += (parseFloat(linea.cantidad_original) * parseFloat(linea.precio_unitario_original));
+
+        let costeTotalPedidoSinGastosEnEuros = 0;
+        const valorConversion = parseFloat(pedidoInfo.valor_conversion) || 1.0;
+
+        lineasPedido.forEach(linea => {
+            const precioOriginal = parseFloat(linea.precio_unitario_original) || 0;
+            const cantidad = parseFloat(linea.cantidad_original) || 0;
+            // Convertir a EUR si es necesario
+            const precioEnEuros = (linea.moneda_original && linea.moneda_original.toUpperCase() !== 'EUR') 
+                                 ? precioOriginal * valorConversion 
+                                 : precioOriginal;
+            costeTotalPedidoSinGastosEnEuros += cantidad * precioEnEuros;
         });
 
         let totalGastosRepercutibles = 0;
@@ -488,9 +511,28 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
             }
         });
 
-        const porcentajeGastos = costeTotalPedidoSinGastosEnMonedaOriginal > 0 ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnMonedaOriginal : 0;
+        const porcentajeGastos = costeTotalPedidoSinGastosEnEuros > 0 ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnEuros : 0;
 
-        return { pedidoInfo, gastos, stockItems, porcentajeGastos };
+        // Crear el desglose detallado para el frontend
+        const lineasDetalladas = lineasPedido.map(linea => {
+            const precioOriginal = parseFloat(linea.precio_unitario_original) || 0;
+            const precioEnEuros = (linea.moneda_original && linea.moneda_original.toUpperCase() !== 'EUR')
+                                 ? precioOriginal * valorConversion
+                                 : precioOriginal;
+
+            const costeFinalUnitario = precioEnEuros * (1 + porcentajeGastos);
+
+            return {
+                descripcion: linea.descripcion,
+                cantidad_original: linea.cantidad_original,
+                precio_unitario_original: precioOriginal, // El precio en su moneda original
+                moneda_original: linea.moneda_original,
+                coste_final_unitario: costeFinalUnitario // El coste final en EUR con gastos
+            };
+        });
+
+        // Devolver todo en un solo objeto
+        return { pedidoInfo, gastos, stockItems, porcentajeGastos, lineasDetalladas };
 
     } catch (error) {
         console.error(`Error obteniendo detalles completos del pedido ${pedidoId}:`, error.message);
@@ -499,7 +541,6 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
         if (db) db.close();
     }
 }
-
 
 async function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
     const estadosPermitidos = ['DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO'];
@@ -563,10 +604,10 @@ async function eliminarPedidoCompleto(pedidoId) {
 }
 
 
-async function insertarProductoTerminado(dbInstance, productoData) {
-    const { nombre, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final } = productoData;
+async function insertarProductoTerminado(productoData) {
+    const { nombre, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
     
-    // Se genera un SKU basado en el nombre para la búsqueda
+    // Generamos un SKU estándar para buscar o crear el item
     const sku = `PT-${nombre.toUpperCase().replace(/\s+/g, '-')}`;
 
     // Ahora inserta en la tabla 'Items'
@@ -584,18 +625,22 @@ async function insertarProductoTerminado(dbInstance, productoData) {
         status || 'ACTIVO',
         material_principal,
         espesor_principal,
-        parseFloat(ancho_final) || null
+        largo_final ? (parseFloat(ancho_final) || null) : (parseFloat(ancho_final) || null) // Asumiendo ancho_final tambien para largo
     ];
 
     try {
-        const result = await runAsync(dbInstance, query, params);
-        // La referencia ya no se actualiza en un segundo paso, se inserta directamente
+        // Usamos runDB que maneja la conexión y cierre automáticamente
+        const result = await runDB(query, params);
         return result.lastID;
     } catch (err) {
         console.error("Error al insertar producto terminado (como item):", err.message);
+        if (err.message.includes("UNIQUE constraint failed: Items.sku")) {
+            throw new Error(`Ya existe una plantilla de producto con un SKU derivado del nombre '${nombre}'.`);
+        }
         throw err;
     }
 }
+
 
 
 // backend-node/db_operations.js
@@ -1401,204 +1446,74 @@ async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) 
  * @param {object} configuraciones - Objeto con las configuraciones cargadas.
  * @returns {Promise<object>} Resumen de la operación.
  */
-async function procesarOrdenProduccion(ordenProduccionId, configuraciones) {
-    const db = conectarDB(); // Conexión para la transacción
+// En db_operations.js
+// REEMPLAZA la función 'procesarOrdenProduccion' entera
+async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, configuraciones) {
+    const db = conectarDB();
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
         const orden = await getAsync(db, `SELECT * FROM OrdenesProduccion WHERE id = ?`, [ordenProduccionId]);
-        if (!orden) {
-            throw new Error(`Orden de Producción con ID ${ordenProduccionId} no encontrada.`);
-        }
-        if (orden.status === 'COMPLETADA') {
-            throw new Error(`La Orden de Producción ID ${ordenProduccionId} ya está completada.`);
-        }
-        if (orden.status === 'CANCELADA') {
-            throw new Error(`La Orden de Producción ID ${ordenProduccionId} está cancelada.`);
-        }
-        if (parseFloat(orden.cantidad_a_producir) <= 0) {
-            throw new Error(`La cantidad a producir para la Orden de Producción ID ${ordenProduccionId} debe ser mayor que cero.`);
+        if (!orden || orden.status !== 'PENDIENTE') {
+            throw new Error(`Orden ID ${ordenProduccionId} no encontrada o no está en estado PENDIENTE.`);
         }
 
-        const productoTerminado = await getAsync(db, `SELECT * FROM ProductosTerminados WHERE id = ?`, [orden.producto_terminado_id]);
-        if (!productoTerminado) {
-            throw new Error(`Producto terminado asociado a la orden ID ${ordenProduccionId} no encontrado.`);
-        }
+        const productoTerminado = await getAsync(db, `SELECT * FROM Items WHERE id = ?`, [orden.item_id]);
+        if (!productoTerminado) throw new Error(`Producto terminado ID ${orden.item_id} no encontrado.`);
 
-        const recetas = await allAsync(db, `
-            SELECT r.cantidad_requerida, r.unidades_por_ancho_material, r.peso_por_unidad_producto,
-                   r.material_tipo_generico, r.subtipo_material_generico, r.espesor_generico, r.ancho_generico, r.color_generico,
-                   r.componente_ref_generico
-            FROM Recetas r
-            WHERE r.producto_terminado_id = ?
-        `, [orden.producto_terminado_id]);
+        let costeTotalMaterialesReal = 0;
 
-        let totalCosteMaterialesReal = 0;
-        let totalCosteProcesosReal = 0;
-        let totalPesoProductosTerminados = 0;
+        for (const assignment of stockAssignments) {
+            const recetaItem = await getAsync(db, `SELECT * FROM Recetas WHERE id = ?`, [assignment.recetaId]);
+            if (!recetaItem) throw new Error(`Item de receta con ID ${assignment.recetaId} no encontrado.`);
 
-        const costeManoObraDefault = parseFloat(configuraciones.coste_mano_obra_default || 0);
+            const stockItem = await getAsync(db, `SELECT * FROM Stock WHERE id = ?`, [assignment.stockId]);
+            if (!stockItem) throw new Error(`Lote de stock con ID ${assignment.stockId} no encontrado.`);
+            
+            const cantidadNecesaria = (recetaItem.cantidad_requerida || 0) * (orden.cantidad_a_producir || 0);
 
-        // --- Lógica para buscar y consumir stock real ---
-        for (const receta of recetas) {
-            const cantidadRequeridaPorUnidadPT = parseFloat(receta.cantidad_requerida) || 0;
-            const unidadesPorAncho = parseFloat(receta.unidades_por_ancho_material) || 1;
-            const cantidadTotalNecesariaParaOrden = cantidadRequeridaPorUnidadPT * parseFloat(orden.cantidad_a_producir);
-
-            let stockItemConsumido = null; // Para almacenar el ítem de stock real que se va a consumir
-            let cantidadRealAConsumirDeStock = 0;
-            let costeUnitarioRealDeStock = 0;
-            let stockTable = '';
-            let stockIdField = '';
-            let stockQuantityField = '';
-
-            if (receta.material_tipo_generico) {
-                // Buscar materia prima disponible que coincida con las características genéricas
-                const availableMaterialStock = await allAsync(db, `
-                    SELECT id, largo_actual, coste_unitario_final
-                    FROM StockMateriasPrimas
-                    WHERE material_tipo = ?
-                      AND (subtipo_material = ? OR (subtipo_material IS NULL AND ? IS NULL))
-                      AND (espesor = ? OR (espesor IS NULL AND ? IS NULL))
-                      AND (ancho = ? OR (ancho IS NULL AND ? IS NULL))
-                      AND (color = ? OR (color IS NULL AND ? IS NULL))
-                      AND status IN ('DISPONIBLE', 'EMPEZADA')
-                    ORDER BY fecha_entrada_almacen ASC, id ASC -- FIFO
-                `, [
-                    receta.material_tipo_generico,
-                    receta.subtipo_material_generico, receta.subtipo_material_generico,
-                    receta.espesor_generico, receta.espesor_generico,
-                    receta.ancho_generico, receta.ancho_generico,
-                    receta.color_generico, receta.color_generico
-                ]);
-
-                if (availableMaterialStock.length === 0) {
-                    throw new Error(`Stock insuficiente: No hay materia prima genérica '${receta.material_tipo_generico} ${receta.espesor_generico} ${receta.ancho_generico}mm' disponible para la orden.`);
-                }
-
-                // Determinar la cantidad a consumir de la bobina real (considerando aprovechamiento de ancho)
-                cantidadRealAConsumirDeStock = cantidadTotalNecesariaParaOrden / unidadesPorAncho;
-                
-                // Consumir del primer ítem de stock disponible que tenga suficiente cantidad
-                let consumedFromThisItem = false;
-                for (const item of availableMaterialStock) {
-                    if (item.largo_actual >= cantidadRealAConsumirDeStock) {
-                        stockItemConsumido = item;
-                        costeUnitarioRealDeStock = parseFloat(item.coste_unitario_final) || 0;
-                        stockTable = 'StockMateriasPrimas';
-                        stockIdField = 'id';
-                        stockQuantityField = 'largo_actual';
-                        consumedFromThisItem = true;
-                        break;
-                    }
-                }
-                if (!consumedFromThisItem) {
-                    throw new Error(`Stock insuficiente: No hay una única bobina con suficiente largo de materia prima genérica '${receta.material_tipo_generico} ${receta.espesor_generico} ${receta.ancho_generico}mm' para la orden. Necesario: ${cantidadRealAConsumirDeStock.toFixed(2)}.`);
-                }
-
-            } else if (receta.componente_ref_generico) {
-                // Buscar componente disponible
-                const availableComponentStock = await allAsync(db, `
-                    SELECT id, cantidad_actual, coste_unitario_final
-                    FROM StockComponentes
-                    WHERE componente_ref = ?
-                    AND status IN ('DISPONIBLE', 'RESERVADO')
-                    ORDER BY fecha_entrada_almacen ASC, id ASC -- FIFO
-                `, [receta.componente_ref_generico]);
-
-                if (availableComponentStock.length === 0) {
-                    throw new Error(`Stock insuficiente: No hay componente genérico '${receta.componente_ref_generico}' disponible para la orden.`);
-                }
-
-                cantidadRealAConsumirDeStock = cantidadTotalNecesariaParaOrden; // No hay aprovechamiento de ancho para componentes
-
-                let consumedFromThisItem = false;
-                for (const item of availableComponentStock) {
-                    if (item.cantidad_actual >= cantidadRealAConsumirDeStock) {
-                        stockItemConsumido = item;
-                        costeUnitarioRealDeStock = parseFloat(item.coste_unitario_final) || 0;
-                        stockTable = 'StockComponentes';
-                        stockIdField = 'id';
-                        stockQuantityField = 'cantidad_actual';
-                        consumedFromThisItem = true;
-                        break;
-                    }
-                }
-                if (!consumedFromThisItem) {
-                    throw new Error(`Stock insuficiente: No hay suficiente cantidad de componente genérico '${receta.componente_ref_generico}' para la orden. Necesario: ${cantidadRealAConsumirDeStock.toFixed(2)}.`);
-                }
-            } else {
-                console.warn(`Receta ID ${receta.id} no tiene material genérico ni componente genérico. Ignorando.`);
-                continue;
+            if (stockItem.cantidad_actual < cantidadNecesaria) {
+                throw new Error(`Stock insuficiente para el lote ${stockItem.lote}. Necesario: ${cantidadNecesaria}, Disponible: ${stockItem.cantidad_actual}.`);
             }
 
-            // Actualizar el stock consumido
-            if (stockItemConsumido) {
-                await runAsync(db, `UPDATE ${stockTable} SET ${stockQuantityField} = ${stockQuantityField} - ? WHERE ${stockIdField} = ?`, [cantidadRealAConsumirDeStock, stockItemConsumido.id]);
-                console.log(`Consumido ${cantidadRealAConsumirDeStock.toFixed(2)} de ${stockTable} ID ${stockItemConsumido.id}`);
-                totalCosteMaterialesReal += cantidadRealAConsumirDeStock * costeUnitarioRealDeStock;
-            }
-
-            // Sumar el peso de los productos terminados
-            const pesoPorUnidadPT = parseFloat(receta.peso_por_unidad_producto) || 0;
-            totalPesoProductosTerminados += pesoPorUnidadPT * parseFloat(orden.cantidad_a_producir);
+            // Descontar stock
+            const nuevaCantidad = stockItem.cantidad_actual - cantidadNecesaria;
+            const nuevoStatus = nuevaCantidad > 0 ? 'EMPEZADA' : 'AGOTADO';
+            await runAsync(db, `UPDATE Stock SET cantidad_actual = ?, status = ? WHERE id = ?`, [nuevaCantidad, nuevoStatus, stockItem.id]);
+            
+            // Acumular coste real
+            costeTotalMaterialesReal += cantidadNecesaria * (stockItem.coste_lote || 0);
         }
 
-        // 3. Calcular coste de procesos
-        const procesos = await allAsync(db, `
-            SELECT pf.tiempo_estimado_horas,
-                   m.coste_hora_operacion
-            FROM ProcesosFabricacion pf
-            JOIN Maquinaria m ON pf.maquinaria_id = m.id
-            WHERE pf.producto_terminado_id = ?
-        `, [orden.producto_terminado_id]);
+        // Calcular coste de procesos (esta lógica no cambia)
+        const costeProcesos = await calcularCosteProcesos(db, orden.item_id, configuraciones);
+        const costeTotalProcesos = costeProcesos * orden.cantidad_a_producir;
+        
+        const costeFabricacionReal = costeTotalMaterialesReal + costeTotalProcesos;
+        const costeUnitarioFinal = orden.cantidad_a_producir > 0 ? costeFabricacionReal / orden.cantidad_a_producir : 0;
+        
+        // Añadir producto terminado al stock
+        const lotePT = `PROD-OP${ordenProduccionId}`;
+        await runAsync(db, `
+            INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, orden_produccion_id, fecha_entrada, status) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [orden.item_id, lotePT, orden.cantidad_a_producir, orden.cantidad_a_producir, costeUnitarioFinal, orden.id, new Date().toISOString().split('T')[0], 'DISPONIBLE']
+        );
 
-        for (const proceso of procesos) {
-            const tiempoHoras = parseFloat(proceso.tiempo_estimado_horas) || 0;
-            const costeMaquinaOperacion = parseFloat(proceso.coste_hora_operacion) || 0;
-            totalCosteProcesosReal += tiempoHoras * (costeManoObraDefault + costeMaquinaOperacion);
-        }
-        totalCosteProcesosReal *= parseFloat(orden.cantidad_a_producir);
-
-
-        const costeFabricacionReal = totalCosteMaterialesReal + totalCosteProcesosReal + (parseFloat(productoTerminado.coste_extra_unitario) || 0) * parseFloat(orden.cantidad_a_producir);
-        const costeUnitarioProductoFinal = parseFloat(orden.cantidad_a_producir) > 0
-            ? costeFabricacionReal / parseFloat(orden.cantidad_a_producir)
-            : 0;
-
-        // 4. Insertar producto terminado en StockProductosTerminados
-        const stockProductoTerminadoData = {
-            producto_id: orden.producto_terminado_id,
-            orden_produccion_id: orden.id,
-            cantidad_actual: parseFloat(orden.cantidad_a_producir),
-            unidad_medida: productoTerminado.unidad_medida,
-            coste_unitario_final: costeUnitarioProductoFinal,
-            fecha_entrada_almacen: new Date().toISOString().split('T')[0],
-            status: 'DISPONIBLE',
-            ubicacion: 'ALMACEN_PT',
-            notas: `Producido por OP ${orden.id}`
-        };
-        await insertarStockProductoTerminado(db, stockProductoTerminadoData);
-        console.log(`Producto terminado ID ${orden.producto_terminado_id} añadido al stock.`);
-
-        // 5. Actualizar estado de la Orden de Producción
+        // Actualizar la orden
         await runAsync(db, `UPDATE OrdenesProduccion SET status = 'COMPLETADA', coste_real_fabricacion = ? WHERE id = ?`, [costeFabricacionReal, orden.id]);
-        console.log(`Orden de Producción ID ${orden.id} marcada como COMPLETADA.`);
 
         await runAsync(db, 'COMMIT;');
         return {
-            mensaje: `Orden de Producción ID ${orden.id} completada. ${orden.cantidad_a_producir} unidades de ${productoTerminado.nombre} producidas.`,
-            costeFabricacionReal: costeFabricacionReal,
-            costeUnitarioProductoFinal: costeUnitarioProductoFinal,
-            pesoTotalProductosTerminados: totalPesoProductosTerminados
+            mensaje: `Orden ID ${ordenProduccionId} completada. ${orden.cantidad_a_producir} uds. de '${productoTerminado.descripcion}' añadidas al stock.`,
+            costeFabricacionReal,
         };
-
     } catch (error) {
-        console.error(`Error procesando Orden de Producción ID ${ordenProduccionId}, revirtiendo:`, error.message, error.stack);
+        console.error(`Error en transacción procesarOrdenProduccion para ID ${ordenProduccionId}:`, error);
         await runAsync(db, 'ROLLBACK;');
         throw error;
     } finally {
-        db.close(); // Cerrar la conexión al finalizar la transacción
+        db.close();
     }
 }
 
@@ -1866,6 +1781,36 @@ async function crearItem(itemData) {
 }
 
 
+// AÑADIR esta nueva función en db_operations.js
+async function consultarFamiliasYEspesores() {
+    // Consultamos los items de materia prima que tienen al menos un lote en stock
+    const sql = `
+        SELECT DISTINCT
+            i.familia,
+            i.espesor
+        FROM Items i
+        WHERE i.tipo_item = 'MATERIA_PRIMA'
+          AND EXISTS (SELECT 1 FROM Stock s WHERE s.item_id = i.id)
+        ORDER BY i.familia, i.espesor;
+    `;
+    const rows = await allDB(sql);
+
+    // Procesamos el resultado para agrupar espesores por familia
+    const familias = rows.reduce((acc, row) => {
+        if (!row.familia || !row.espesor) return acc; // Ignorar si no tienen datos
+        if (!acc[row.familia]) {
+            acc[row.familia] = [];
+        }
+        if (!acc[row.familia].includes(row.espesor)) {
+            acc[row.familia].push(row.espesor);
+        }
+        return acc;
+    }, {});
+
+    return familias;
+}
+
+
 // --- Funciones para la configuración (leer/escribir config.json) ---
 async function obtenerConfiguracion() {
     try {
@@ -1897,6 +1842,8 @@ module.exports = {
     obtenerDetallesCompletosPedido,
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
+
+    consultarFamiliasYEspesores,
 
     insertarProductoTerminado,
     consultarProductosTerminados,

@@ -38,7 +38,6 @@ function DetallePedidoModal({ pedidoId, onClose }) {
     if (!dateString) return 'N/A';
     try {
       const date = new Date(dateString);
-      // Ajuste para asegurar que la fecha se muestre correctamente sin importar la zona horaria del navegador
       const userTimezoneOffset = date.getTimezoneOffset() * 60000;
       const correctedDate = new Date(date.getTime() + userTimezoneOffset);
       return correctedDate.toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -49,7 +48,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '800px'}}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '950px'}}>
         {loading && <p>Cargando detalles del pedido...</p>}
         {error && <p className="error-backend">Error al cargar detalles: {error}</p>}
         
@@ -67,10 +66,36 @@ function DetallePedidoModal({ pedidoId, onClose }) {
               </div>
             </div>
 
-            {/* --- SECCIÓN DE ITEMS DE STOCK AÑADIDA --- */}
+            {/* --- NUEVA SECCIÓN DE DESGLOSE DE LÍNEAS --- */}
+            {detallePedido.lineasDetalladas && detallePedido.lineasDetalladas.length > 0 && (
+              <div className="detalle-pedido-seccion">
+                <h3>Desglose de Líneas de Compra</h3>
+                <table className="sub-table">
+                  <thead>
+                    <tr>
+                      <th>Descripción Material</th>
+                      <th>Cantidad</th>
+                      <th>Precio Compra / m</th>
+                      <th>Coste Final / m (con gastos)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detallePedido.lineasDetalladas.map((linea, index) => (
+                      <tr key={`linea-${index}`}>
+                        <td>{linea.descripcion}</td>
+                        <td>{parseFloat(linea.cantidad_original).toFixed(2)} m</td>
+                        <td>{parseFloat(linea.precio_unitario_original).toFixed(4)} {linea.moneda_original}</td>
+                        <td>{parseFloat(linea.coste_final_unitario).toFixed(4)} €</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {detallePedido.stockItems && detallePedido.stockItems.length > 0 && (
               <div className="detalle-pedido-seccion">
-                <h3>Items de Stock Recibidos</h3>
+                <h3>Items de Stock Generados</h3>
                 <table className="sub-table">
                   <thead>
                     <tr>
@@ -96,7 +121,6 @@ function DetallePedidoModal({ pedidoId, onClose }) {
               </div>
             )}
 
-            {/* --- SECCIÓN DE GASTOS AÑADIDA --- */}
             {detallePedido.gastos && detallePedido.gastos.length > 0 && (
               <div className="detalle-pedido-seccion">
                 <h3>Desglose de Gastos</h3>

@@ -1,5 +1,4 @@
-// En frontend-react/src/components/TarifaVenta.jsx
-
+// frontend-react/src/components/TarifaVenta.jsx
 import { useState, useEffect, useCallback } from 'react';
 
 function TarifaVenta() {
@@ -25,7 +24,6 @@ function TarifaVenta() {
     setLoading(true);
     setError(null);
     const apiUrl = `http://localhost:5002/api/tarifa-venta?tipo_tarifa=${selectedTipoTarifa}`;
-    console.log("Llamando a API para tarifa de venta de Materiales:", apiUrl);
 
     try {
       const response = await fetch(apiUrl);
@@ -36,7 +34,6 @@ function TarifaVenta() {
       const data = await response.json();
       setTarifaData(data);
     } catch (err) {
-      console.error(`Error al obtener tarifa de venta para ${selectedTipoTarifa}:`, err);
       setError(err.message);
       setTarifaData([]);
     } finally {
@@ -73,6 +70,7 @@ function TarifaVenta() {
 
       {loading && <p>Generando tarifa...</p>}
       {error && <p className="error-backend">Error al generar tarifa: {error}</p>}
+      
       {!loading && !error && selectedTipoTarifa && tarifaData.length === 0 && (
         <p>No hay materiales en stock para mostrar.</p>
       )}
@@ -85,8 +83,8 @@ function TarifaVenta() {
           <thead>
             <tr>
               <th>Referencia Stock</th>
-              <th>Descripción Material</th>
-              <th>Unidad</th>
+              <th>Espesor</th>
+              <th>Ancho (mm)</th>
               <th>Coste Metro Lineal (€)</th>
               <th>Margen Aplicado (%)</th>
               <th>Precio Venta Metro Lineal (€)</th>
@@ -96,8 +94,8 @@ function TarifaVenta() {
             {tarifaData.map(item => (
               <tr key={item.id}>
                 <td>{item.referencia_stock}</td>
-                <td>{item.descripcion}</td>
-                <td>{item.unidad_medida}</td>
+                <td>{item.espesor || '-'}</td>
+                <td>{item.ancho || '-'}</td>
                 <td>{item.coste_metro_lineal.toFixed(4)}</td>
                 <td>{(item.margen_aplicado * 100).toFixed(2)}%</td>
                 <td>{item.precio_venta_metro_lineal.toFixed(2)}</td>
