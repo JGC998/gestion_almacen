@@ -7,15 +7,14 @@ import ListaPedidos from './ListaPedidos.jsx';
 import TarifaVenta from './components/TarifaVenta.jsx';
 import GestionProductosRecetas from './components/GestionProductosRecetas.jsx';
 import GestionMaquinaria from './components/GestionMaquinaria.jsx';
-import GestionProcesosFabricacion from './components/GestionProcesosFabricacion.jsx';
-import GestionOrdenesProduccion from './components/GestionOrdenesProduccion.jsx';
+import GestionProduccion from './components/GestionProduccion.jsx';
 import FormularioConfiguracion from './components/FormularioConfiguracion.jsx';
 import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
+import FormularioEditarPedido from './components/FormularioEditarPedido.jsx';
 
-// --- Modal de Detalles para la nueva estructura de Stock ---
+// El modal de detalles ya no se usará en esta vista, pero lo dejamos por si se necesita en otro lugar.
 function DetalleStockModal({ item, onClose }) {
   if (!item) return null;
-
    return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -24,10 +23,8 @@ function DetalleStockModal({ item, onClose }) {
             <p><strong>Referencia:</strong> {item.sku || 'N/A'}</p>
             <p><strong>Descripción:</strong> {item.descripcion || 'N/A'}</p>
             <p><strong>Familia:</strong> {item.familia || 'N/A'}</p>
-            {/* --- CAMPOS AÑADIDOS --- */}
             <p><strong>Espesor:</strong> {item.espesor || 'N/A'}</p>
             <p><strong>Ancho:</strong> {item.ancho ? `${item.ancho} mm` : 'N/A'}</p>
-            {/* --- FIN DE CAMPOS AÑADIDOS --- */}
             <p><strong>Lote:</strong> {item.lote || 'N/A'}</p>
             <p><strong>Cantidad Actual:</strong> {parseFloat(item.cantidad_actual || 0).toFixed(2)} {item.unidad_medida}</p>
             <p><strong>Coste del Lote:</strong> {parseFloat(item.coste_lote || 0).toFixed(4)} €/{item.unidad_medida}</p>
@@ -45,27 +42,19 @@ function App() {
   const [stockList, setStockList] = useState([]);
   const [loadingStock, setLoadingStock] = useState(true);
   const [errorStock, setErrorStock] = useState(null);
-
   const [filtroFamilia, setFiltroFamilia] = useState('');
-  const [filtroBusqueda, setFiltroBusqueda] = useState('');
-
-  const [itemSeleccionadoParaModal, setItemSeleccionadoParaModal] = useState(null);
-  const [mostrarModalDetalles, setMostrarModalDetalles] = useState(false);
-  
   const [vistaActual, setVistaActual] = useState('STOCK');
+  const [pedidoAEditarId, setPedidoAEditarId] = useState(null);
 
   const fetchStockAndProcess = useCallback(async () => {
     setLoadingStock(true);
     setErrorStock(null);
-
     const params = new URLSearchParams();
     if (filtroFamilia) params.append('familia', filtroFamilia);
-    if (filtroBusqueda) params.append('buscar', filtroBusqueda);
-
     const queryString = params.toString();
-    const apiUrl = `http://localhost:5002/api/stock${queryString ? `?${queryString}` : ''}`;
+    const apiUrl = `http://localhost:5002/api/stock/agrupado${queryString ? `?${queryString}` : ''}`;
     
-    console.log("Llamando a la API de stock con nueva estructura:", apiUrl);
+    console.log("Llamando a la API de stock agrupado:", apiUrl);
 
     try {
       const response = await fetch(apiUrl);
@@ -73,32 +62,41 @@ function App() {
       const data = await response.json();
       setStockList(data);
     } catch (err) {
-      console.error("Error al obtener y procesar el stock:", err);
+      console.error("Error al obtener y procesar el stock agrupado:", err);
       setErrorStock(err.message);
       setStockList([]);
     } finally {
       setLoadingStock(false);
     }
-  }, [filtroFamilia, filtroBusqueda]);
+  }, [filtroFamilia]);
 
   useEffect(() => {
-    fetchStockAndProcess();
-  }, [fetchStockAndProcess]);
+    if (vistaActual === 'STOCK') {
+        fetchStockAndProcess();
+    }
+  }, [vistaActual, fetchStockAndProcess]);
 
-  const handleVerDetalles = (lote) => {
-    setItemSeleccionadoParaModal(lote);
-    setMostrarModalDetalles(true);
-  };
-
+  // LA FUNCIÓN renderVista SÓLO DEVUELVE EL CONTENIDO DE LA VISTA ACTUAL
   const renderVista = () => {
+    if (pedidoAEditarId) {
+        return <FormularioEditarPedido 
+                    pedidoId={pedidoAEditarId} 
+                    onFinalizado={() => setPedidoAEditarId(null)} // Al finalizar, volvemos a la lista
+                    onCancel={() => setPedidoAEditarId(null)} // Al cancelar, también
+                />;
+    }
+
+
     switch (vistaActual) {
       case 'NACIONAL': return <FormularioPedidoNacional />;
-      case 'LISTA_PEDIDOS': return <ListaPedidos />;
-      case 'IMPORTACION': return <FormularioPedidoImportacion />;
+      case 'LISTA_PEDIDOS': return <ListaPedidos status="COMPLETADO" onEditRequest={setPedidoAEditarId} />;
+      case 'BORRADORES': return <ListaPedidos status="BORRADOR" onEditRequest={setPedidoAEditarId} />;
       case 'TARIFA_VENTA': return <TarifaVenta />;
       case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
+      case 'IMPORTACION': return <FormularioPedidoImportacion />;
+      case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
       case 'MAQUINARIA': return <GestionMaquinaria />;
-      case 'PRODUCCION': return <GestionProduccion />; // NUEVO
+      case 'PRODUCCION': return <GestionProduccion />;
       case 'CONFIGURACION': return <FormularioConfiguracion />;
       case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
       case 'STOCK':
@@ -106,16 +104,12 @@ function App() {
         if (loadingStock) return <p>Cargando stock...</p>;
         if (errorStock) return <p className="error-backend">Error al cargar lista de stock: {errorStock}</p>;
 
-        // En frontend-react/src/App.jsx
-
-// Reemplazar el return dentro del 'case 'STOCK':' en la función 'renderVista' con esto:
         return (
             <>
               <h2>Stock Actual</h2>
               <div className="filtros-container">
                 <div className="filtro-item">
-                  <label htmlFor="filtro-familia">Familia:</label>
-                  {/* CORRECCIÓN: Añadidas todas las familias al filtro */}
+                  <label htmlFor="filtro-familia">Filtrar por Familia:</label>
                   <select id="filtro-familia" value={filtroFamilia} onChange={(e) => setFiltroFamilia(e.target.value)}>
                       <option value="">Todas</option>
                       <option value="GOMA">GOMA</option>
@@ -126,49 +120,31 @@ function App() {
                       <option value="NEGRA">NEGRA</option>
                   </select>
                 </div>
-                {/* Podríamos añadir más filtros aquí en el futuro */}
               </div>
 
-              {stockList.length === 0 && <p>No hay lotes de stock que coincidan con los filtros.</p>}
+              {stockList.length === 0 && <p>No hay stock que coincida con los filtros.</p>}
 
               {stockList.length > 0 && (
                 <table>
-                  {/* CORRECCIÓN: Cabeceras de tabla actualizadas */}
                   <thead>
                     <tr>
-                      <th>Referencia</th>
-                      <th>Descripción</th>
+                      <th>Material</th>
                       <th>Espesor</th>
                       <th>Ancho (mm)</th>
-                      <th>Lote</th>
-                      <th>Cantidad Actual</th>
-                      <th>Unidad</th>
-                      <th>Ubicación</th>
-                      <th>Estado</th>
-                      <th>Acciones</th>
+                      <th>Largo (m)</th>
+                      <th>Nº de Bobinas</th>
+                      <th>Precio Compra (€/m)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {stockList.map((lote) => (
-                      <tr key={lote.id}>
-                        {/* CORRECCIÓN: Se muestra 'sku' como Referencia y se añaden los nuevos campos */}
-                        <td>{lote.sku}</td>
-                        <td>{lote.descripcion}</td>
-                        <td>{lote.espesor || '-'}</td>
-                        <td>{lote.ancho || '-'}</td>
-                        <td>{lote.lote}</td>
-                        <td>{parseFloat(lote.cantidad_actual || 0).toFixed(2)}</td>
-                        <td>{lote.unidad_medida}</td>
-                        <td>{lote.ubicacion || '-'}</td>
-                        <td>{lote.status}</td>
-                        <td>
-                          <button
-                            className="details-button"
-                            onClick={() => handleVerDetalles(lote)}
-                          >
-                            Detalles
-                          </button>
-                        </td>
+                    {stockList.map((item, index) => (
+                      <tr key={`${item.familia}-${item.largo}-${index}`}>
+                        <td>{item.familia}</td>
+                        <td>{item.espesor || '-'}</td>
+                        <td>{item.ancho || '-'}</td>
+                        <td>{parseFloat(item.largo || 0).toFixed(2)}</td>
+                        <td>{item.numero_bobinas}</td>
+                        <td>{parseFloat(item.coste_compra_final || 0).toFixed(4)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -178,7 +154,8 @@ function App() {
         );
     }
   };
-
+  
+  // LA ESTRUCTURA PRINCIPAL DE LA APP VA AQUÍ, EN EL RETURN DEL COMPONENTE APP
   return (
     <div className="app-layout">
       <nav className="sidebar">
@@ -190,13 +167,14 @@ function App() {
             <button onClick={() => setVistaActual('TARIFA_VENTA')} disabled={vistaActual === 'TARIFA_VENTA'}>Ver Tarifa Venta</button>
             <button onClick={() => setVistaActual('NACIONAL')} disabled={vistaActual === 'NACIONAL'}>Nuevo Pedido Nacional</button>
             <button onClick={() => setVistaActual('IMPORTACION')} disabled={vistaActual === 'IMPORTACION'}>Nuevo Pedido Importación</button>
+            <button onClick={() => setVistaActual('BORRADORES')} disabled={vistaActual === 'BORRADORES'}>Borradores</button>
         </div>
         <div className="sidebar-section">
-     <h3>Fabricación</h3>
-     <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
-     <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
-     <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Producción</button>
- </div>
+            <h3>Fabricación</h3>
+            <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
+            <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
+            <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Producción</button>
+        </div>
         <div className="sidebar-section">
             <h3>Herramientas</h3>
             <button onClick={() => setVistaActual('CALCULADORA_PRESUPUESTOS')} disabled={vistaActual === 'CALCULADORA_PRESUPUESTOS'}>Calculadora Presupuestos</button>
@@ -208,12 +186,6 @@ function App() {
           {renderVista()}
         </div>
       </div>
-      {mostrarModalDetalles && (
-        <DetalleStockModal
-          item={itemSeleccionadoParaModal}
-          onClose={() => setMostrarModalDetalles(false)}
-        />
-      )}
     </div>
   );
 }

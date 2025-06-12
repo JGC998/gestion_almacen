@@ -9,7 +9,6 @@ function DetallePedidoModal({ pedidoId, onClose }) {
 
   const fetchDetallePedido = useCallback(async () => {
     if (!pedidoId) return;
-
     setLoading(true);
     setError(null);
     const apiUrl = `http://localhost:5002/api/pedidos/${pedidoId}/detalles`;
@@ -33,59 +32,60 @@ function DetallePedidoModal({ pedidoId, onClose }) {
   useEffect(() => {
     fetchDetallePedido();
   }, [fetchDetallePedido]);
-  
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-      const correctedDate = new Date(date.getTime() + userTimezoneOffset);
-      return correctedDate.toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' });
-    } catch (e) {
-      return dateString;
-    }
-  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '950px'}}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxWidth: '1000px'}}>
         {loading && <p>Cargando detalles del pedido...</p>}
         {error && <p className="error-backend">Error al cargar detalles: {error}</p>}
         
         {detallePedido && !loading && !error && (
           <>
-            <h2>Detalles del Pedido: {detallePedido.pedidoInfo.numero_factura} (ID: {pedidoId})</h2>
+            <h2>Detalles del Pedido: {detallePedido.pedidoInfo.numero_factura}</h2>
             
+            {/* SECCIÓN DE INFORMACIÓN DEL PEDIDO MODIFICADA */}
             <div className="detalle-pedido-seccion">
               <h3>Información del Pedido</h3>
-              <div className="modal-details-grid">
+              <div className="modal-details-grid" style={{gridTemplateColumns: 'auto 1fr auto 1fr'}}>
                 <p><strong>Nº Factura:</strong> {detallePedido.pedidoInfo.numero_factura}</p>
                 <p><strong>Proveedor:</strong> {detallePedido.pedidoInfo.proveedor || '-'}</p>
-                <p><strong>Fecha Pedido:</strong> {formatDate(detallePedido.pedidoInfo.fecha_pedido)}</p>
-                <p><strong>% Gastos sobre Material:</strong> {(detallePedido.porcentajeGastos * 100).toFixed(2)}%</p>
+                {/* AÑADIMOS DE NUEVO EL PORCENTAJE DE GASTOS AQUÍ */}
+                <p><strong>% Gastos sobre Material:</strong> {(detallePedido.porcentajeGastos * 100).toFixed(2)} %</p>
+                {detallePedido.pedidoInfo.origen_tipo === 'CONTENEDOR' && (
+                  <p><strong>Valor Conversión:</strong> {detallePedido.pedidoInfo.valor_conversion}</p>
+                )}
+                {Object.entries(detallePedido.resumenGastos).map(([tipo, total]) => (
+                    <p key={tipo}><strong>Suma {tipo}:</strong> {total.toFixed(2)} €</p>
+                ))}
               </div>
             </div>
 
-            {/* --- NUEVA SECCIÓN DE DESGLOSE DE LÍNEAS --- */}
+            {/* SECCIÓN DE LÍNEAS DE PEDIDO REDISEÑADA */}
             {detallePedido.lineasDetalladas && detallePedido.lineasDetalladas.length > 0 && (
               <div className="detalle-pedido-seccion">
-                <h3>Desglose de Líneas de Compra</h3>
+                <h3>Líneas del Pedido</h3>
                 <table className="sub-table">
                   <thead>
                     <tr>
-                      <th>Descripción Material</th>
-                      <th>Cantidad</th>
-                      <th>Precio Compra / m</th>
-                      <th>Coste Final / m (con gastos)</th>
+                      <th>Material</th>
+                      <th>Espesor</th>
+                      <th>Ancho (mm)</th>
+                      <th>Largo (m)</th>
+                      <th>Nº Bobinas</th>
+                      <th>Precio Compra (€)</th>
+                      <th>Precio Compra + Gastos (€)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detallePedido.lineasDetalladas.map((linea, index) => (
-                      <tr key={`linea-${index}`}>
-                        <td>{linea.descripcion}</td>
-                        <td>{parseFloat(linea.cantidad_original).toFixed(2)} m</td>
-                        <td>{parseFloat(linea.precio_unitario_original).toFixed(4)} {linea.moneda_original}</td>
-                        <td>{parseFloat(linea.coste_final_unitario).toFixed(4)} €</td>
+                      <tr key={index}>
+                        <td>{linea.familia}</td>
+                        <td>{linea.espesor}</td>
+                        <td>{linea.ancho}</td>
+                        <td>{parseFloat(linea.largo).toFixed(2)}</td>
+                        <td>{linea.numero_bobinas}</td>
+                        <td>{linea.precio_sin_gastos.toFixed(4)}</td>
+                        <td>{linea.precio_con_gastos.toFixed(4)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -93,34 +93,7 @@ function DetallePedidoModal({ pedidoId, onClose }) {
               </div>
             )}
 
-            {detallePedido.stockItems && detallePedido.stockItems.length > 0 && (
-              <div className="detalle-pedido-seccion">
-                <h3>Items de Stock Generados</h3>
-                <table className="sub-table">
-                  <thead>
-                    <tr>
-                      <th>Referencia (SKU)</th>
-                      <th>Descripción</th>
-                      <th>Lote</th>
-                      <th>Cantidad Recibida</th>
-                      <th>Coste Lote (€)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detallePedido.stockItems.map(item => (
-                      <tr key={`stock-${item.id}`}>
-                        <td>{item.sku}</td>
-                        <td>{item.descripcion}</td>
-                        <td>{item.lote}</td>
-                        <td>{parseFloat(item.cantidad_actual).toFixed(2)} {item.unidad_medida}</td>
-                        <td>{parseFloat(item.coste_lote).toFixed(4)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
+            {/* SECCIÓN DE DESGLOSE DE GASTOS (se mantiene igual) */}
             {detallePedido.gastos && detallePedido.gastos.length > 0 && (
               <div className="detalle-pedido-seccion">
                 <h3>Desglose de Gastos</h3>

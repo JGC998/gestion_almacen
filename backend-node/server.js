@@ -10,14 +10,19 @@ const fs = require('fs');
 // --- Importar funciones de db_operations.js ---
 const {
     consultarStock,
+    actualizarYFinalizarPedido,
     procesarNuevoPedido,
     consultarListaPedidos,
     obtenerDetallesCompletosPedido,
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
+    consultarStockAgrupado,
+
+    consultarStockParaTarifa, // <-- AÑADIR ESTA
 
     crearItem,
     consultarFamiliasYEspesores,
+    consultarProveedoresUnicos, // <-- AÑADIR ESTA
     insertarProductoTerminado,
     consultarProductosTerminados,
     consultarProductoTerminadoPorId,
@@ -134,11 +139,12 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 // En backend-node/server.js
 
+// En server.js, REEMPLAZA la función crearTablasSiNoExisten entera
+
 function crearTablasSiNoExisten() {
     db.serialize(() => {
         console.log("Verificando/Creando tablas con la nueva estructura normalizada...");
 
-        // 1. Tabla Maestra de Artículos (reemplaza a ProductosTerminados y las descripciones de Stock)
         db.run(`CREATE TABLE IF NOT EXISTS Items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sku TEXT UNIQUE NOT NULL,
@@ -149,10 +155,9 @@ function crearTablasSiNoExisten() {
             ancho REAL,
             unidad_medida TEXT NOT NULL,
             coste_estandar REAL DEFAULT 0,
-            status TEXT DEFAULT 'ACTIVO'  -- <--- COLUMNA AÑADIDA
+            status TEXT DEFAULT 'ACTIVO'
         )`, (err) => { if (err) console.error("Error creando tabla Items:", err.message); });
 
-        // 2. Tablas de Compras (se mantienen pero LineasPedido ahora apunta a Items)
         db.run(`CREATE TABLE IF NOT EXISTS PedidosProveedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             numero_factura TEXT NOT NULL UNIQUE,
@@ -161,7 +166,8 @@ function crearTablasSiNoExisten() {
             fecha_llegada TEXT,
             origen_tipo TEXT NOT NULL,
             observaciones TEXT,
-            valor_conversion REAL
+            valor_conversion REAL,
+            status TEXT NOT NULL DEFAULT 'COMPLETADO'
         )`, (err) => { if (err) console.error("Error creando tabla PedidosProveedores:", err.message); });
 
         db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
@@ -184,7 +190,18 @@ function crearTablasSiNoExisten() {
             FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE RESTRICT
         )`, (err) => { if (err) console.error("Error creando tabla LineasPedido:", err.message); });
 
-        // 3. Nueva Tabla de Stock Unificada
+        // --- TABLA 'OrdenesProduccion' AÑADIDA AQUÍ ---
+        db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER NOT NULL,
+            cantidad_a_producir REAL NOT NULL,
+            fecha TEXT,
+            status TEXT DEFAULT 'PENDIENTE',
+            coste_real_fabricacion REAL,
+            observaciones TEXT,
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE
+        )`, (err) => { if (err) console.error("Error creando tabla OrdenesProduccion:", err.message); });
+
         db.run(`CREATE TABLE IF NOT EXISTS Stock (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER NOT NULL,
@@ -205,7 +222,13 @@ function crearTablasSiNoExisten() {
             else console.log("Tabla 'Stock' verificada/creada.");
         });
 
-        // 4. Tablas de Fabricación (ahora apuntan a Items)
+        db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL,
+            descripcion TEXT,
+            coste_hora_operacion REAL
+        )`, (err) => { if (err) console.error("Error creando tabla Maquinaria:", err.message); });
+
         db.run(`CREATE TABLE IF NOT EXISTS Recetas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             producto_id INTEGER NOT NULL,
@@ -215,10 +238,21 @@ function crearTablasSiNoExisten() {
             FOREIGN KEY(material_id) REFERENCES Items(id) ON DELETE RESTRICT
         )`, (err) => { if (err) console.error("Error creando tabla Recetas:", err.message); });
 
+        db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto_id INTEGER NOT NULL,
+            maquinaria_id INTEGER NOT NULL,
+            nombre_proceso TEXT,
+            tiempo_estimado_segundos INTEGER,
+            aplica_a_clientes TEXT,
+            FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
+            FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id)
+        )`, (err) => { if (err) console.error("Error creando tabla ProcesosFabricacion:", err.message); });
+
+
         console.log("Verificación/Creación de tablas completada.");
     });
 }
-
 
 // --- Rutas de la API (Endpoints existentes) ---
 app.get('/api/estado', (req, res) => {
@@ -334,6 +368,35 @@ app.get('/api/items', async (req, res) => {
     } catch (error) {
         console.error("Error en el endpoint /api/items:", error.message);
         res.status(500).json({ error: "Error interno del servidor al obtener los items."});
+    }
+});
+
+// AÑADE estos dos nuevos endpoints en server.js
+
+// Endpoint para autocompletar proveedores
+app.get('/api/proveedores', async (req, res) => {
+    try {
+        const proveedores = await consultarProveedoresUnicos();
+        // Mapeamos para devolver un array de strings simple
+        res.json(proveedores.map(p => p.proveedor));
+    } catch (error) {
+        res.status(500).json({ error: "Error al obtener proveedores.", detalle: error.message });
+    }
+});
+
+// Endpoint para verificar si una factura ya existe
+app.get('/api/pedidos/verificar-factura', async (req, res) => {
+    const { numero } = req.query;
+    if (!numero) {
+        return res.status(400).json({ error: 'Se requiere un número de factura.' });
+    }
+    try {
+        const db = conectarDB();
+        const pedido = await getAsync(db, `SELECT id FROM PedidosProveedores WHERE numero_factura = ?`, [numero]);
+        db.close();
+        res.json({ existe: !!pedido });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al verificar la factura.', detalle: error.message });
     }
 });
 
@@ -525,60 +588,39 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
 
 // ... en backend-node/server.js
 
+// REEMPLAZA el endpoint entero en server.js
 app.get('/api/tarifa-venta', async (req, res) => {
+    console.log('Node.js: GET /api/tarifa-venta');
     const { tipo_tarifa } = req.query;
-
-    console.log(`Node.js: GET /api/tarifa-venta para MATERIALES EN STOCK, tipo: ${tipo_tarifa}`);
-
     if (!tipo_tarifa) {
-        return res.status(400).json({ error: "El parámetro 'tipo_tarifa' es requerido." });
+        return res.status(400).json({ error: "Debe especificar un 'tipo_tarifa'." });
     }
-    const tipoTarifaNormalizado = tipo_tarifa.toLowerCase();
-    const tiposTarifaValidos = ['final', 'fabricante', 'metrajes', 'intermediario'];
-    if (!tiposTarifaValidos.includes(tipoTarifaNormalizado)) {
-        return res.status(400).json({ error: `Valor de 'tipo_tarifa' no válido.` });
-    }
+
+    const margenKey = `margen_default_${tipo_tarifa.toLowerCase()}`;
+    const margenAplicado = appConfig[margenKey] !== undefined ? appConfig[margenKey] : 0.3; // Un 30% por defecto si no se encuentra
 
     try {
-        const configuracionesApp = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
-        const claveMargen = `margen_default_${tipoTarifaNormalizado}`;
-        let margenAplicado = configuracionesApp[claveMargen];
+        // Usamos la nueva función que devuelve el stock agrupado
+        const stockAgrupado = await consultarStockParaTarifa();
 
-        if (margenAplicado === undefined || isNaN(parseFloat(margenAplicado))) {
-            margenAplicado = 0;
-        }
-        margenAplicado = parseFloat(margenAplicado);
-
-        // --- CORRECCIÓN AQUÍ ---
-        // Se reemplaza la función obsoleta y se filtran solo materias primas.
-        const stockItems = await consultarStock({ status: 'DISPONIBLE,EMPEZADA' });
-        const materiasPrimasEnStock = stockItems.filter(item => item.familia !== 'FALDETA' && item.tipo_item !== 'PRODUCTO_TERMINADO'); // Asumiendo que los productos terminados tienen una familia o tipo diferente.
-
-        if (materiasPrimasEnStock.length === 0) {
-            return res.json([]);
-        }
-
-        const tarifaVentaMateriales = materiasPrimasEnStock.map(item => {
-            const costeBase = parseFloat(item.coste_lote) || 0;
+        const tarifaVentaMateriales = stockAgrupado.map(item => {
+            const costeBase = parseFloat(item.coste_promedio) || 0;
             const precioVenta = costeBase * (1 + margenAplicado);
 
             return {
-                id: item.id,
-                referencia_stock: item.sku,
-                espesor: item.espesor, // <-- AÑADIR
-                ancho: item.ancho,     // <-- AÑADIR
+                material: item.familia,
+                espesor: item.espesor,
+                ancho: item.ancho,
                 coste_metro_lineal: costeBase,
                 margen_aplicado: margenAplicado,
                 precio_venta_metro_lineal: precioVenta
             };
         });
 
-        console.log(`Tarifa de venta de MATERIALES generada para tipo_tarifa: ${tipoTarifaNormalizado}`);
         res.json(tarifaVentaMateriales);
-
     } catch (error) {
-        console.error("Error en /api/tarifa-venta (materiales):", error.message);
-        res.status(500).json({ error: "Error interno al generar la tarifa de venta de materiales.", detalle: error.message });
+        console.error("Error en GET /api/tarifa-venta:", error.message);
+        res.status(500).json({ error: "Error interno al generar la tarifa de venta.", detalle: error.message });
     }
 });
 
@@ -592,6 +634,22 @@ app.get('/api/stock/familias-y-espesores', async (req, res) => {
     } catch (error) {
         console.error("Error en GET /api/stock/familias-y-espesores:", error.message);
         res.status(500).json({ error: "Error interno al obtener familias y espesores.", detalle: error.message });
+    }
+});
+
+
+// AÑADE este nuevo endpoint en server.js, cerca del otro endpoint de /api/stock
+
+app.get('/api/stock/agrupado', async (req, res) => {
+    console.log('Node.js: Solicitud a GET /api/stock/agrupado');
+    try {
+        const filtros = req.query;
+        const stockItems = await consultarStockAgrupado(filtros);
+        console.log(`Node.js: Devolviendo ${stockItems.length} grupos de stock.`);
+        res.json(stockItems);
+    } catch (error) {
+        console.error("Error en el endpoint /api/stock/agrupado:", error.message);
+        res.status(500).json({ error: "Error interno del servidor al obtener el stock agrupado.", detalle: error.message });
     }
 });
 
@@ -1223,8 +1281,23 @@ app.get('/api/referencias-stock-con-coste', async (req, res) => {
         console.error("Error en GET /api/referencias-stock-con-coste:", error.message);
         res.status(500).json({ error: "Error interno del servidor al obtener referencias de stock con coste.", detalle: error.message });
     }
+
 });
 
+// AÑADE este nuevo endpoint en server.js
+
+// REEMPLAZA este endpoint en server.js
+app.put('/api/pedidos/:id/finalizar', async (req, res) => {
+    const pedidoId = parseInt(req.params.id, 10);
+    const datosNuevos = req.body; // Recibimos el pedido y los nuevos gastos
+
+    try {
+        const resultado = await actualizarYFinalizarPedido(pedidoId, datosNuevos);
+        res.json({ mensaje: `Pedido ${pedidoId} finalizado y stock procesado.` });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al finalizar el pedido.', detalle: error.message });
+    }
+});
 
 // --- ENDPOINTS PARA CONFIGURACIÓN ---
 app.get('/api/configuracion', async (req, res) => {
@@ -1237,6 +1310,8 @@ app.get('/api/configuracion', async (req, res) => {
         res.status(500).json({ error: "Error interno del servidor al obtener la configuración.", detalle: error.message });
     }
 });
+
+
 
 app.put('/api/configuracion', async (req, res) => {
     const updates = req.body;

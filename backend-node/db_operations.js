@@ -334,57 +334,73 @@ async function findOrCreateItem(dbInstance, linea, familia) {
     }
 }
 
+// REEMPLAZA esta función en db_operations.js
 
-// REEMPLAZAR la función 'procesarNuevoPedido' existente por esta nueva versión
 async function procesarNuevoPedido(datosCompletosPedido) {
-    const { pedido, lineas, gastos, material_tipo_general } = datosCompletosPedido;
+    // Añadimos 'status' que vendrá desde el payload
+    const { pedido, lineas, gastos, material_tipo_general, status } = datosCompletosPedido;
     const db = conectarDB();
 
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
         const pedidoResult = await runAsync(db,
-            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, origen_tipo, valor_conversion, observaciones) VALUES (?, ?, ?, ?, ?, ?)`,
-            [pedido.numero_factura, pedido.proveedor, pedido.fecha_pedido, pedido.origen_tipo, pedido.valor_conversion, pedido.observaciones]
+            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, origen_tipo, valor_conversion, observaciones, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [pedido.numero_factura, pedido.proveedor, pedido.fecha_pedido, pedido.origen_tipo, pedido.valor_conversion, pedido.observaciones, status || 'COMPLETADO']
         );
         const pedidoId = pedidoResult.lastID;
+        
+        // --- LA LÓGICA DE STOCK SÓLO SE EJECUTA SI EL PEDIDO NO ES UN BORRADOR ---
+        if (status !== 'BORRADOR') {
+            // Lógica de cálculo de costes
+            const valorConversion = parseFloat(pedido.valor_conversion) || 1.0;
+            let costeTotalPedidoSinGastosEnEuros = 0;
+            lineas.forEach(linea => {
+                const precioUnitario = parseFloat(linea.precio_unitario_original) || 0;
+                const cantidad = parseFloat(linea.cantidad_original) || 0;
+                const precioEnEuros = pedido.origen_tipo === 'CONTENEDOR' ? precioUnitario * valorConversion : precioUnitario;
+                costeTotalPedidoSinGastosEnEuros += cantidad * precioEnEuros * (parseInt(linea.numero_bobinas, 10) || 1);
+            });
+            let totalGastosRepercutibles = 0;
+            gastos.forEach(gasto => {
+                const tipoGastoUpper = gasto.tipo_gasto?.toUpperCase();
+                if (tipoGastoUpper === 'NACIONAL' || (tipoGastoUpper === 'SUPLIDOS' && !gasto.descripcion?.toUpperCase().includes('IVA'))) {
+                    totalGastosRepercutibles += (parseFloat(gasto.coste_eur) || 0);
+                }
+            });
+            const porcentajeGastos = costeTotalPedidoSinGastosEnEuros > 0 ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnEuros : 0;
 
+            // Inserción de líneas y stock
+            for (const linea of lineas) {
+                const itemId = await findOrCreateItem(db, linea, material_tipo_general);
+                await insertarLineaPedido(db, { ...linea, item_id: itemId, pedido_id: pedidoId });
+                
+                const costeUnitarioOriginal = parseFloat(linea.precio_unitario_original) || 0;
+                const costeUnitarioEnEuros = pedido.origen_tipo === 'CONTENEDOR' ? costeUnitarioOriginal * valorConversion : costeUnitarioOriginal;
+                const costeFinalConGastos = costeUnitarioEnEuros * (1 + porcentajeGastos);
+                
+                const numeroDeBobinas = parseInt(linea.numero_bobinas, 10) || 1;
+                for (let i = 1; i <= numeroDeBobinas; i++) {
+                    const sufijoUnico = numeroDeBobinas > 1 ? `-${i}` : '';
+                    const proveedorLimpio = (pedido.proveedor || 'SIN-PROV').trim().toUpperCase().replace(/\s+/g, '-');
+                    const lote = `${proveedorLimpio}-${(linea.referencia_bobina || 'SIN-REF').trim().replace(/\s+/g, '-')}-P${pedidoId}-I${itemId}${sufijoUnico}`;
+
+                    await runAsync(db,
+                        `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [itemId, lote, parseFloat(linea.cantidad_original) || 0, parseFloat(linea.cantidad_original) || 0, costeFinalConGastos, pedidoId, pedido.fecha_pedido]
+                    );
+                }
+            }
+        }
+        
+        // Los gastos se guardan siempre, tanto en borrador como en completo
         for (const gasto of gastos) {
             await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`,
                 [pedidoId, gasto.tipo_gasto, gasto.descripcion, gasto.coste_eur]);
         }
 
-        for (const linea of lineas) {
-            const itemId = await findOrCreateItem(db, linea, material_tipo_general);
-
-            await insertarLineaPedido(db, {
-                ...linea,
-                item_id: itemId,
-                pedido_id: pedidoId
-            });
-            
-            const costeUnitarioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-            const costeFinalConGastos = costeUnitarioOriginal * (1 + (pedido.porcentajeGastos || 0));
-            
-            // --- INICIO DE LA NUEVA LÓGICA ---
-            const numeroDeBobinas = parseInt(linea.numero_bobinas, 10) || 1;
-
-            for (let i = 1; i <= numeroDeBobinas; i++) {
-                // Generamos un lote único para CADA bobina, añadiendo un sufijo numérico si hay más de una.
-                const sufijoUnico = numeroDeBobinas > 1 ? `-${i}` : '';
-                const proveedorLimpio = (pedido.proveedor || 'SIN-PROV').trim().toUpperCase().replace(/\s+/g, '-');
-                const lote = `${proveedorLimpio}-${(linea.referencia_bobina || 'SIN-REF').trim().replace(/\s+/g, '-')}-P${pedidoId}-I${itemId}${sufijoUnico}`;
-
-                await runAsync(db,
-                    `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, ubicacion, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [itemId, lote, linea.cantidad_original, linea.cantidad_original, costeFinalConGastos, linea.ubicacion || null, pedidoId, pedido.fecha_pedido]
-                );
-            }
-            // --- FIN DE LA NUEVA LÓGICA ---
-        }
-
         await runAsync(db, 'COMMIT;');
-        return { pedidoId: pedidoId, mensaje: `Pedido ${pedido.numero_factura} procesado exitosamente.` };
+        return { pedidoId: pedidoId, mensaje: `Pedido ${pedido.numero_factura} guardado como ${status || 'COMPLETADO'}.` };
 
     } catch (error) {
         console.error(`Error en la transacción de procesarNuevoPedido:`, error);
@@ -395,11 +411,24 @@ async function procesarNuevoPedido(datosCompletosPedido) {
     }
 }
 
+
+
 async function consultarListaPedidos(filtros = {}) {
-    let sql = `SELECT id, numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion
+    // Se añade la columna status a la selección
+    let sql = `SELECT id, numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion, status
                     FROM PedidosProveedores`;
     const params = [];
     const whereClauses = [];
+
+
+    // --- AÑADIMOS FILTRO POR ESTADO ---
+    if (filtros.status) {
+        whereClauses.push(`status = ?`);
+        params.push(filtros.status.toUpperCase());
+    } else {
+        // Por defecto, si no se especifica un estado, no mostramos los borradores
+        whereClauses.push(`status != 'BORRADOR'`);
+    }
 
     if (filtros.origen_tipo) {
         whereClauses.push(`origen_tipo = ?`);
@@ -458,81 +487,131 @@ async function consultarLineasPedidoPorPedidoId(dbInstance, pedidoId) {
 }
 // En backend-node/db_operations.js
 
+// REEMPLAZA esta función en db_operations.js
+
 async function consultarStockPorPedidoId(dbInstance, pedidoId) {
-    // Esta nueva función consulta las tablas correctas: Stock e Items
-    return allAsync(dbInstance, `
+    // Esta nueva consulta agrupa los items de stock idénticos y los cuenta.
+    const sql = `
         SELECT
-            s.id,
-            s.lote,
-            s.cantidad_actual,
-            s.coste_lote,
             i.sku,
             i.descripcion,
-            i.unidad_medida
+            i.unidad_medida,
+            s.coste_lote,
+            COUNT(s.id) AS numero_bobinas,
+            SUM(s.cantidad_actual) AS cantidad_total_agrupada
         FROM Stock s
         JOIN Items i ON s.item_id = i.id
         WHERE s.pedido_id = ?
-        ORDER BY s.id`, [pedidoId]);
+        GROUP BY i.sku, i.descripcion, i.unidad_medida, s.coste_lote
+        ORDER BY i.sku
+    `;
+    return allAsync(dbInstance, sql, [pedidoId]);
 }
 
-// REEMPLAZA la función 'obtenerDetallesCompletosPedido' existente
+// AÑADE esta nueva función en db_operations.js
+
+// REEMPLAZA esta función en db_operations.js
+
+async function consultarStockAgrupado(filtros = {}) {
+    // La consulta ahora agrupa también por el largo inicial (cantidad_inicial)
+    let sql = `
+        SELECT
+            i.familia,
+            i.espesor,
+            i.ancho,
+            s.cantidad_inicial AS largo,
+            AVG(s.coste_lote) AS coste_compra_final,
+            COUNT(s.id) AS numero_bobinas
+        FROM Stock s
+        JOIN Items i ON s.item_id = i.id
+        WHERE i.tipo_item = 'MATERIA_PRIMA' 
+          AND s.cantidad_actual > 0 
+    `;
+    const params = [];
+    
+    if (filtros.familia) {
+        sql += ` AND i.familia = ?`;
+        params.push(filtros.familia.toUpperCase());
+    }
+
+    sql += ` 
+        GROUP BY 
+            i.familia,
+            i.espesor,
+            i.ancho,
+            s.cantidad_inicial -- Agrupamos por largo inicial
+        ORDER BY 
+            i.familia, i.espesor, i.ancho, largo
+    `;
+    
+    return await allDB(sql, params);
+}
+
+
+// REEMPLAZA esta función en db_operations.js
+
 async function obtenerDetallesCompletosPedido(pedidoId) {
     const db = conectarDB();
     try {
-        const pedidoInfo = await consultarInfoPedidoPorId(db, pedidoId);
-        if (!pedidoInfo) {
-            return null;
-        }
+        const pedidoInfo = await getAsync(db, `SELECT * FROM PedidosProveedores WHERE id = ?`, [pedidoId]);
+        if (!pedidoInfo) return null;
 
-        const [gastos, stockItems, lineasPedido] = await Promise.all([
-            consultarGastosPorPedidoId(db, pedidoId),
-            consultarStockPorPedidoId(db, pedidoId),
-            consultarLineasPedidoPorPedidoId(db, pedidoId)
-        ]);
+        const gastos = await allAsync(db, `SELECT * FROM GastosPedido WHERE pedido_id = ?`, [pedidoId]);
+        
+        // Obtenemos las líneas de pedido originales y las agrupamos por tipo de item
+        const lineasOriginales = await allAsync(db, `
+            SELECT 
+                i.familia, i.espesor, i.ancho,
+                lp.cantidad_original AS largo,
+                lp.precio_unitario_original,
+                lp.moneda_original,
+                COUNT(lp.id) as numero_bobinas
+            FROM LineasPedido lp
+            JOIN Items i ON lp.item_id = i.id
+            WHERE lp.pedido_id = ?
+            GROUP BY i.familia, i.espesor, i.ancho, lp.cantidad_original, lp.precio_unitario_original, lp.moneda_original
+        `, [pedidoId]);
 
-        let costeTotalPedidoSinGastosEnEuros = 0;
+        // Calculamos los costes y sumas para la cabecera
         const valorConversion = parseFloat(pedidoInfo.valor_conversion) || 1.0;
+        let costeTotalBaseEnEuros = 0;
+        let resumenGastos = {};
 
-        lineasPedido.forEach(linea => {
-            const precioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-            const cantidad = parseFloat(linea.cantidad_original) || 0;
-            // Convertir a EUR si es necesario
-            const precioEnEuros = (linea.moneda_original && linea.moneda_original.toUpperCase() !== 'EUR') 
-                                 ? precioOriginal * valorConversion 
-                                 : precioOriginal;
-            costeTotalPedidoSinGastosEnEuros += cantidad * precioEnEuros;
-        });
-
-        let totalGastosRepercutibles = 0;
         gastos.forEach(gasto => {
-            const tipoGastoUpper = gasto.tipo_gasto?.toUpperCase();
-            if (tipoGastoUpper === 'NACIONAL' || (tipoGastoUpper === 'SUPLIDOS' && !gasto.descripcion?.toUpperCase().includes('IVA'))) {
-                totalGastosRepercutibles += (parseFloat(gasto.coste_eur) || 0);
+            const coste = parseFloat(gasto.coste_eur) || 0;
+            if (pedidoInfo.origen_tipo === 'CONTENEDOR') {
+                const tipo = gasto.tipo_gasto.toUpperCase();
+                if (!resumenGastos[tipo]) resumenGastos[tipo] = 0;
+                resumenGastos[tipo] += coste;
+            } else {
+                if (!resumenGastos['Total Gastos']) resumenGastos['Total Gastos'] = 0;
+                resumenGastos['Total Gastos'] += coste;
             }
         });
 
-        const porcentajeGastos = costeTotalPedidoSinGastosEnEuros > 0 ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnEuros : 0;
-
-        // Crear el desglose detallado para el frontend
-        const lineasDetalladas = lineasPedido.map(linea => {
+        const lineasDetalladas = lineasOriginales.map(linea => {
             const precioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-            const precioEnEuros = (linea.moneda_original && linea.moneda_original.toUpperCase() !== 'EUR')
-                                 ? precioOriginal * valorConversion
-                                 : precioOriginal;
-
-            const costeFinalUnitario = precioEnEuros * (1 + porcentajeGastos);
-
-            return {
-                descripcion: linea.descripcion,
-                cantidad_original: linea.cantidad_original,
-                precio_unitario_original: precioOriginal, // El precio en su moneda original
-                moneda_original: linea.moneda_original,
-                coste_final_unitario: costeFinalUnitario // El coste final en EUR con gastos
-            };
+            const precioEnEuros = pedidoInfo.origen_tipo === 'CONTENEDOR' ? precioOriginal * valorConversion : precioOriginal;
+            costeTotalBaseEnEuros += (precioEnEuros * parseFloat(linea.largo) * linea.numero_bobinas);
+            return { ...linea, precio_sin_gastos: precioEnEuros };
         });
 
-        // Devolver todo en un solo objeto
-        return { pedidoInfo, gastos, stockItems, porcentajeGastos, lineasDetalladas };
+        const totalGastosRepercutibles = Object.values(resumenGastos).reduce((a, b) => a + b, 0);
+        const porcentajeGastos = costeTotalBaseEnEuros > 0 ? totalGastosRepercutibles / costeTotalBaseEnEuros : 0;
+
+        // Añadimos el precio con gastos a cada línea
+        lineasDetalladas.forEach(linea => {
+            linea.precio_con_gastos = linea.precio_sin_gastos * (1 + porcentajeGastos);
+        });
+
+        // El objeto final que se enviará al frontend
+        return { 
+            pedidoInfo, 
+            gastos,
+            lineasDetalladas,
+            resumenGastos,
+            porcentajeGastos, // <-- AÑADIR ESTA LÍNEA
+        };
 
     } catch (error) {
         console.error(`Error obteniendo detalles completos del pedido ${pedidoId}:`, error.message);
@@ -541,6 +620,7 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
         if (db) db.close();
     }
 }
+
 
 async function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
     const estadosPermitidos = ['DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO'];
@@ -563,13 +643,15 @@ async function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
     }
 }
 
+// REEMPLAZA esta función en db_operations.js
 async function eliminarPedidoCompleto(pedidoId) {
     const db = conectarDB(); // Conexión para la transacción
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
-        const stockChanges = await runAsync(db, 'DELETE FROM StockMateriasPrimas WHERE pedido_id = ?', [pedidoId]);
-        console.log(`StockMateriasPrimas eliminadas para pedido ID ${pedidoId}: ${stockChanges.changes} filas`);
+        // CORREGIDO: Ahora apunta a la tabla unificada 'Stock'
+        const stockChanges = await runAsync(db, 'DELETE FROM Stock WHERE pedido_id = ?', [pedidoId]);
+        console.log(`Stock eliminado para pedido ID ${pedidoId}: ${stockChanges.changes} filas`);
 
         const gastosChanges = await runAsync(db, 'DELETE FROM GastosPedido WHERE pedido_id = ?', [pedidoId]);
         console.log(`GastosPedido eliminados para pedido ID ${pedidoId}: ${gastosChanges.changes} filas`);
@@ -597,12 +679,12 @@ async function eliminarPedidoCompleto(pedidoId) {
     } catch (error) {
         console.error(`Error en la transacción de eliminarPedidoCompleto para ID ${pedidoId}, revirtiendo:`, error.message);
         await runAsync(db, 'ROLLBACK;');
+        // Lanza el error para que el endpoint lo capture y lo envíe al frontend
         throw error;
     } finally {
         db.close(); // Cerrar la conexión al finalizar la transacción
     }
 }
-
 
 async function insertarProductoTerminado(productoData) {
     const { nombre, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
@@ -1164,6 +1246,26 @@ async function insertarOrdenProduccion(ordenData) {
         }
         throw error;
     }
+}
+
+
+// AÑADE esta nueva función en db_operations.js
+
+async function consultarStockParaTarifa() {
+    const sql = `
+        SELECT
+            i.familia,
+            i.espesor,
+            i.ancho,
+            AVG(s.coste_lote) AS coste_promedio
+        FROM Stock s
+        JOIN Items i ON s.item_id = i.id
+        WHERE i.tipo_item = 'MATERIA_PRIMA' 
+          AND s.cantidad_actual > 0
+        GROUP BY i.familia, i.espesor, i.ancho
+        ORDER BY i.familia, i.espesor, i.ancho;
+    `;
+    return await allDB(sql);
 }
 
 async function consultarOrdenesProduccion(filtros = {}) {
@@ -1833,6 +1935,72 @@ async function actualizarConfiguracion(newConfig) {
 }
 
 
+// AÑADE esta nueva función en db_operations.js
+async function consultarProveedoresUnicos() {
+    const sql = `SELECT DISTINCT proveedor FROM PedidosProveedores WHERE proveedor IS NOT NULL AND proveedor != '' ORDER BY proveedor ASC`;
+    return await allDB(sql);
+}
+
+
+// AÑADE esta nueva función en db_operations.js
+// AÑADE esta nueva función en db_operations.js (y elimina finalizarPedidoBorrador)
+
+async function actualizarYFinalizarPedido(pedidoId, datosNuevos) {
+    const { gastos } = datosNuevos;
+    const db = conectarDB();
+    try {
+        await runAsync(db, 'BEGIN TRANSACTION;');
+
+        // 1. Borramos los gastos viejos para reemplazarlos por los nuevos
+        await runAsync(db, `DELETE FROM GastosPedido WHERE pedido_id = ?`, [pedidoId]);
+
+        // 2. Insertamos los gastos actualizados que vienen del formulario
+        for (const gasto of gastos) {
+            await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`,
+                [pedidoId, gasto.tipo_gasto, gasto.descripcion, gasto.coste_eur]);
+        }
+        
+        // 3. Obtenemos toda la información necesaria para procesar el stock
+        const pedido = await getAsync(db, `SELECT * FROM PedidosProveedores WHERE id = ?`, [pedidoId]);
+        if (!pedido) throw new Error(`Pedido con ID ${pedidoId} no encontrado.`);
+
+        const lineas = await allAsync(db, `SELECT lp.*, i.referencia_bobina FROM LineasPedido lp JOIN Items i ON lp.item_id = i.id WHERE lp.pedido_id = ?`, [pedidoId]);
+        const item = await getAsync(db, `SELECT i.familia FROM Items i JOIN LineasPedido lp ON i.id = lp.item_id WHERE lp.pedido_id = ? LIMIT 1`, [pedidoId]);
+        const material_tipo_general = item.familia;
+        
+        // 4. Re-calculamos costes con los nuevos gastos y generamos el stock (misma lógica que antes)
+        // (Esta sección es idéntica a la que teníamos en finalizarPedidoBorrador)
+        const valorConversion = parseFloat(pedido.valor_conversion) || 1.0;
+        let costeTotalPedidoSinGastosEnEuros = 0;
+        lineas.forEach(linea => {
+            costeTotalPedidoSinGastosEnEuros += (parseFloat(linea.cantidad_original) * parseFloat(linea.precio_unitario_original) * valorConversion);
+        });
+        const totalGastosRepercutibles = gastos.reduce((acc, g) => acc + (parseFloat(g.coste_eur) || 0), 0);
+        const porcentajeGastos = costeTotalPedidoSinGastosEnEuros > 0 ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnEuros : 0;
+        
+        for (const linea of lineas) {
+             const costeUnitarioEnEuros = (parseFloat(linea.precio_unitario_original) || 0) * valorConversion;
+             const costeFinalConGastos = costeUnitarioEnEuros * (1 + porcentajeGastos);
+             const proveedorLimpio = (pedido.proveedor || 'SIN-PROV').trim().toUpperCase().replace(/\s+/g, '-');
+             const lote = `${proveedorLimpio}-${(linea.referencia_bobina || 'SIN-REF').trim()}-P${pedidoId}-I${linea.item_id}`;
+
+             await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [linea.item_id, lote, linea.cantidad_original, linea.cantidad_original, costeFinalConGastos, pedidoId, pedido.fecha_pedido]);
+        }
+        
+        // 5. Actualizamos el estado del pedido a COMPLETADO
+        await runAsync(db, `UPDATE PedidosProveedores SET status = 'COMPLETADO' WHERE id = ?`, [pedidoId]);
+
+        await runAsync(db, 'COMMIT;');
+        return { success: true };
+    } catch (error) {
+        await runAsync(db, 'ROLLBACK;');
+        throw error;
+    } finally {
+        db.close();
+    }
+}
+
 // --- EXPORTACIONES ---
 module.exports = {
     consultarStock,
@@ -1842,6 +2010,7 @@ module.exports = {
     obtenerDetallesCompletosPedido,
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
+    actualizarYFinalizarPedido,
 
     consultarFamiliasYEspesores,
 
@@ -1875,6 +2044,7 @@ module.exports = {
     actualizarOrdenProduccion,
     eliminarOrdenProduccion,
     procesarOrdenProduccion,
+    actualizarYFinalizarPedido,
 
     actualizarCosteFabricacionEstandar,
 
@@ -1888,8 +2058,12 @@ module.exports = {
 
     calcularCosteProcesos,
     obtenerUltimoCosteMaterialGenerico,
-
+    consultarStockAgrupado,
+    consultarStockParaTarifa,
     insertarPedidoProveedor,
+
+        
+    consultarProveedoresUnicos,
 
     crearItem,
 

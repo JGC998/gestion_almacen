@@ -31,7 +31,9 @@ function ListaPedidos() {
     if (filtroProveedor.trim()) params.append('proveedor_like', filtroProveedor.trim());
     if (filtroFactura.trim()) params.append('factura_like', filtroFactura.trim());
     if (filtroFechaDesde) params.append('fecha_pedido_desde', filtroFechaDesde);
-    
+    if (status) {
+            params.append('status', status);
+        }
     const queryString = params.toString();
     const apiUrl = `http://localhost:5002/api/pedidos${queryString ? `?${queryString}` : ''}`;
     
@@ -99,6 +101,8 @@ function ListaPedidos() {
     }
   };
 
+
+
   return (
     <div className="lista-pedidos-container">
       <h2>Listado de Pedidos y Contenedores</h2>
@@ -140,7 +144,6 @@ function ListaPedidos() {
         <table>
           <thead>
             <tr>
-              <th>ID</th>
               <th>Nº Factura</th>
               <th>Proveedor</th>
               <th>Fecha Pedido</th>
@@ -152,12 +155,11 @@ function ListaPedidos() {
           <tbody>
             {pedidos.map(pedido => (
               <tr 
-                key={pedido.id} 
-                onDoubleClick={() => handlePedidoDoubleClick(pedido.id)}
-                title="Doble clic para ver detalles del pedido"
-                style={{cursor: 'pointer'}}
+                  key={pedido.id} 
+                  onClick={() => status === 'BORRADOR' ? onEditRequest(pedido.id) : handlePedidoDoubleClick(pedido.id)}
+                  title={status === 'BORRADOR' ? 'Clic para editar y finalizar' : 'Doble clic para ver detalles'}
+                  style={{cursor: 'pointer'}}
               >
-                <td>{pedido.id}</td>
                 <td>{pedido.numero_factura}</td>
                 <td>{pedido.proveedor || '-'}</td>
                 <td>{formatDate(pedido.fecha_pedido)}</td>
