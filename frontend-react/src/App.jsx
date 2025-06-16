@@ -11,6 +11,7 @@ import GestionProduccion from './components/GestionProduccion.jsx';
 import FormularioConfiguracion from './components/FormularioConfiguracion.jsx';
 import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
 import FormularioEditarPedido from './components/FormularioEditarPedido.jsx';
+import FormularioOrdenProduccion from './components/FormularioOrdenProduccion.jsx';
 
 // El modal de detalles ya no se usará en esta vista, pero lo dejamos por si se necesita en otro lugar.
 function DetalleStockModal({ item, onClose }) {
@@ -96,9 +97,11 @@ function App() {
       case 'IMPORTACION': return <FormularioPedidoImportacion />;
       case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
       case 'MAQUINARIA': return <GestionMaquinaria />;
-      case 'PRODUCCION': return <GestionProduccion />;
-      case 'CONFIGURACION': return <FormularioConfiguracion />;
+      case 'PRODUCCION': return <GestionProduccion />; // Esta será la lista de órdenes
+      case 'NUEVA_ORDEN_PRODUCCION': return <FormularioOrdenProduccion />; // <-- NUEVO CASE
       case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
+      // En App.jsx, dentro de la función renderVista, REEMPLAZA el bloque case 'STOCK'
+
       case 'STOCK':
       default:
         if (loadingStock) return <p>Cargando stock...</p>;
@@ -106,18 +109,16 @@ function App() {
 
         return (
             <>
-              <h2>Stock Actual</h2>
+              <h2>Stock Actual de Materias Primas</h2>
               <div className="filtros-container">
                 <div className="filtro-item">
                   <label htmlFor="filtro-familia">Filtrar por Familia:</label>
                   <select id="filtro-familia" value={filtroFamilia} onChange={(e) => setFiltroFamilia(e.target.value)}>
                       <option value="">Todas</option>
+                      {/* Aquí podrías cargar las familias dinámicamente si lo deseas en el futuro */}
                       <option value="GOMA">GOMA</option>
                       <option value="FIELTRO">FIELTRO</option>
                       <option value="PVC">PVC</option>
-                      <option value="VERDE">VERDE</option>
-                      <option value="CARAMELO">CARAMELO</option>
-                      <option value="NEGRA">NEGRA</option>
                   </select>
                 </div>
               </div>
@@ -128,23 +129,21 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Material</th>
-                      <th>Espesor</th>
-                      <th>Ancho (mm)</th>
-                      <th>Largo (m)</th>
-                      <th>Nº de Bobinas</th>
-                      <th>Precio Compra (€/m)</th>
+                      <th>Familia</th>
+                      <th>Descripción</th>
+                      <th>Características</th>
+                      <th>Nº de Lotes</th>
+                      <th>Cantidad Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {stockList.map((item, index) => (
-                      <tr key={`${item.familia}-${item.largo}-${index}`}>
+                    {stockList.map((item) => (
+                      <tr key={item.item_id}>
                         <td>{item.familia}</td>
-                        <td>{item.espesor || '-'}</td>
-                        <td>{item.ancho || '-'}</td>
-                        <td>{parseFloat(item.largo || 0).toFixed(2)}</td>
-                        <td>{item.numero_bobinas}</td>
-                        <td>{parseFloat(item.coste_compra_final || 0).toFixed(4)}</td>
+                        <td>{item.descripcion}</td>
+                        <td>{item.atributos}</td>
+                        <td>{item.numero_lotes}</td>
+                        <td>{parseFloat(item.cantidad_total || 0).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -173,7 +172,10 @@ function App() {
             <h3>Fabricación</h3>
             <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
             <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
-            <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Producción</button>
+            {/* Cambiamos el nombre de "Producción" a "Ver Órdenes" o similar */}
+            <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Ver Órdenes</button>
+            {/* NUEVO BOTÓN */}
+            <button onClick={() => setVistaActual('NUEVA_ORDEN_PRODUCCION')} disabled={vistaActual === 'NUEVA_ORDEN_PRODUCCION'}>Nueva Orden Producción</button>
         </div>
         <div className="sidebar-section">
             <h3>Herramientas</h3>

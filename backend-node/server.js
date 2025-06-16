@@ -17,6 +17,9 @@ const {
     actualizarEstadoStockItem,
     eliminarPedidoCompleto,
     consultarStockAgrupado,
+    consultarFamilias,
+
+    consultarTarifas,
 
     consultarStockParaTarifa, // <-- AÑADIR ESTA
 
@@ -135,122 +138,134 @@ const db = new sqlite3.Database(dbPath, (err) => {
     }
 });
 
-// En backend-node/server.js
-
-// En backend-node/server.js
 
 // En server.js, REEMPLAZA la función crearTablasSiNoExisten entera
 
 function crearTablasSiNoExisten() {
     db.serialize(() => {
-        console.log("Verificando/Creando tablas con la nueva estructura normalizada...");
+        console.log("Creando/Verificando tablas con la nueva estructura profesional...");
 
+        // Grupo 1: Catálogos y Atributos
+        db.run(`CREATE TABLE IF NOT EXISTS Familias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS Atributos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS ValoresAtributos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            atributo_id INTEGER NOT NULL,
+            valor TEXT NOT NULL,
+            FOREIGN KEY(atributo_id) REFERENCES Atributos(id) ON DELETE CASCADE,
+            UNIQUE(atributo_id, valor)
+        )`);
+
+        // Grupo 2: Artículos
         db.run(`CREATE TABLE IF NOT EXISTS Items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sku TEXT UNIQUE NOT NULL,
-            descripcion TEXT NOT NULL,
-            tipo_item TEXT NOT NULL CHECK(tipo_item IN ('MATERIA_PRIMA', 'COMPONENTE', 'PRODUCTO_TERMINADO')),
-            familia TEXT,
-            espesor TEXT,
-            ancho REAL,
-            unidad_medida TEXT NOT NULL,
-            coste_estandar REAL DEFAULT 0,
-            status TEXT DEFAULT 'ACTIVO'
-        )`, (err) => { if (err) console.error("Error creando tabla Items:", err.message); });
+            sku TEXT UNIQUE,
+            descripcion TEXT,
+            familia_id INTEGER,
+            tipo_item TEXT NOT NULL CHECK(tipo_item IN ('MATERIA_PRIMA', 'PRODUCTO_TERMINADO')),
+            FOREIGN KEY(familia_id) REFERENCES Familias(id)
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS ItemAtributos (
+            item_id INTEGER NOT NULL,
+            valor_atributo_id INTEGER NOT NULL,
+            PRIMARY KEY (item_id, valor_atributo_id),
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE,
+            FOREIGN KEY(valor_atributo_id) REFERENCES ValoresAtributos(id) ON DELETE CASCADE
+        )`);
 
+        // Grupo 4: Fabricación (Se definen antes para que otras tablas puedan referenciarlas)
+        db.run(`CREATE TABLE IF NOT EXISTS Maquinaria ( id INTEGER PRIMARY KEY, nombre TEXT UNIQUE NOT NULL )`);
+        db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion ( id INTEGER PRIMARY KEY, item_id INTEGER, cantidad_a_producir REAL, FOREIGN KEY(item_id) REFERENCES Items(id) )`);
+        db.run(`CREATE TABLE IF NOT EXISTS Recetas ( id INTEGER PRIMARY KEY, producto_id INTEGER, material_id INTEGER, FOREIGN KEY(producto_id) REFERENCES Items(id), FOREIGN KEY(material_id) REFERENCES Items(id) )`);
+        db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion ( id INTEGER PRIMARY KEY, producto_id INTEGER, maquinaria_id INTEGER, FOREIGN KEY(producto_id) REFERENCES Items(id), FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id) )`);
+
+
+        // Grupo 3: Compras
         db.run(`CREATE TABLE IF NOT EXISTS PedidosProveedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             numero_factura TEXT NOT NULL UNIQUE,
             proveedor TEXT,
             fecha_pedido TEXT,
-            fecha_llegada TEXT,
-            origen_tipo TEXT NOT NULL,
-            observaciones TEXT,
+            origen_tipo TEXT NOT NULL CHECK(origen_tipo IN ('NACIONAL', 'IMPORTACION')),
             valor_conversion REAL,
-            status TEXT NOT NULL DEFAULT 'COMPLETADO'
-        )`, (err) => { if (err) console.error("Error creando tabla PedidosProveedores:", err.message); });
-
-        db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pedido_id INTEGER NOT NULL,
-            tipo_gasto TEXT,
-            descripcion TEXT NOT NULL,
-            coste_eur REAL NOT NULL,
-            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
-        )`, (err) => { if (err) console.error("Error creando tabla GastosPedido:", err.message); });
-
+            status TEXT NOT NULL DEFAULT 'COMPLETADO' CHECK(status IN ('COMPLETADO', 'BORRADOR')),
+            observaciones TEXT
+        )`);
         db.run(`CREATE TABLE IF NOT EXISTS LineasPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pedido_id INTEGER NOT NULL,
             item_id INTEGER NOT NULL,
-            cantidad_original REAL NOT NULL,
-            precio_unitario_original REAL NOT NULL,
-            moneda_original TEXT,
+            cantidad_bobinas INTEGER NOT NULL,
+            metros_por_bobina REAL NOT NULL,
+            precio_unitario REAL NOT NULL,
+            moneda TEXT NOT NULL,
             FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE,
-            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE RESTRICT
-        )`, (err) => { if (err) console.error("Error creando tabla LineasPedido:", err.message); });
-
-        // --- TABLA 'OrdenesProduccion' AÑADIDA AQUÍ ---
-        db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
+            FOREIGN KEY(item_id) REFERENCES Items(id)
+        )`);
+        db.run(`CREATE TABLE IF NOT EXISTS GastosPedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_id INTEGER NOT NULL,
-            cantidad_a_producir REAL NOT NULL,
-            fecha TEXT,
-            status TEXT DEFAULT 'PENDIENTE',
-            coste_real_fabricacion REAL,
-            observaciones TEXT,
-            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE
-        )`, (err) => { if (err) console.error("Error creando tabla OrdenesProduccion:", err.message); });
-
+            pedido_id INTEGER NOT NULL,
+            descripcion TEXT NOT NULL,
+            coste_eur REAL NOT NULL,
+            tipo_gasto TEXT NOT NULL,
+            FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE
+        )`);
+        
+        // Tabla de Stock (se define al final por sus dependencias)
         db.run(`CREATE TABLE IF NOT EXISTS Stock (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lote TEXT UNIQUE NOT NULL,
             item_id INTEGER NOT NULL,
-            lote TEXT NOT NULL UNIQUE,
             cantidad_inicial REAL NOT NULL,
             cantidad_actual REAL NOT NULL,
             coste_lote REAL NOT NULL,
-            ubicacion TEXT,
             pedido_id INTEGER,
             orden_produccion_id INTEGER,
             fecha_entrada TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'DISPONIBLE',
-            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE,
+            FOREIGN KEY(item_id) REFERENCES Items(id),
             FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE SET NULL,
             FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) ON DELETE SET NULL
-        )`, (err) => {
-            if (err) console.error("Error creando tabla Stock:", err.message);
-            else console.log("Tabla 'Stock' verificada/creada.");
-        });
+        )`);
+        
+        // Grupo 5: Precios
+        db.run(`CREATE TABLE IF NOT EXISTS Tarifas (
+            item_id INTEGER NOT NULL,
+            tipo_tarifa TEXT NOT NULL CHECK(tipo_tarifa IN ('FINAL', 'FABRICANTE', 'INTERMEDIARIO', 'METRAJES')),
+            precio_venta REAL NOT NULL,
+            ultimo_coste_compra REAL NOT NULL,
+            fecha_actualizacion TEXT NOT NULL,
+            PRIMARY KEY (item_id, tipo_tarifa),
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE
+        )`);
 
-        db.run(`CREATE TABLE IF NOT EXISTS Maquinaria (
+        // En server.js, dentro de la función crearTablasSiNoExisten
+
+// ... (después del grupo "Tarifas")
+
+        // Grupo 6: Producción
+        db.run(`CREATE TABLE IF NOT EXISTS OrdenesProduccion (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT UNIQUE NOT NULL,
-            descripcion TEXT,
-            coste_hora_operacion REAL
-        )`, (err) => { if (err) console.error("Error creando tabla Maquinaria:", err.message); });
+            item_producido_id INTEGER NOT NULL,
+            lote_materia_prima_id INTEGER NOT NULL,
+            cantidad_producida INTEGER NOT NULL,
+            coste_total_produccion REAL NOT NULL,
+            fecha_creacion TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'COMPLETADO' CHECK(status IN ('PENDIENTE', 'COMPLETADO', 'CANCELADO')),
+            observaciones TEXT,
+            FOREIGN KEY(item_producido_id) REFERENCES Items(id),
+            FOREIGN KEY(lote_materia_prima_id) REFERENCES Stock(id)
+        )`);
 
-        db.run(`CREATE TABLE IF NOT EXISTS Recetas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_id INTEGER NOT NULL,
-            material_id INTEGER NOT NULL,
-            cantidad_requerida REAL NOT NULL,
-            FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
-            FOREIGN KEY(material_id) REFERENCES Items(id) ON DELETE RESTRICT
-        )`, (err) => { if (err) console.error("Error creando tabla Recetas:", err.message); });
+        // Podríamos añadir más tablas aquí en el futuro, como para registrar mermas.
+// ...
 
-        db.run(`CREATE TABLE IF NOT EXISTS ProcesosFabricacion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            producto_id INTEGER NOT NULL,
-            maquinaria_id INTEGER NOT NULL,
-            nombre_proceso TEXT,
-            tiempo_estimado_segundos INTEGER,
-            aplica_a_clientes TEXT,
-            FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE,
-            FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id)
-        )`, (err) => { if (err) console.error("Error creando tabla ProcesosFabricacion:", err.message); });
-
-
-        console.log("Verificación/Creación de tablas completada.");
+        console.log("Estructura de tablas profesional verificada.");
     });
 }
 
@@ -368,6 +383,16 @@ app.get('/api/items', async (req, res) => {
     } catch (error) {
         console.error("Error en el endpoint /api/items:", error.message);
         res.status(500).json({ error: "Error interno del servidor al obtener los items."});
+    }
+});
+
+// AÑADE este nuevo endpoint en server.js
+app.get('/api/familias', async (req, res) => {
+    try {
+        const familias = await consultarFamilias();
+        res.json(familias);
+    } catch (error) {
+        res.status(500).json({ error: "Error al obtener las familias.", detalle: error.message });
     }
 });
 
@@ -583,47 +608,14 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
 });
 
 
-// MODIFICADA: Endpoint /api/tarifa-venta para usar ProductosTerminados
-// En backend-node/server.js
-
-// ... en backend-node/server.js
-
-// REEMPLAZA el endpoint entero en server.js
-app.get('/api/tarifa-venta', async (req, res) => {
-    console.log('Node.js: GET /api/tarifa-venta');
-    const { tipo_tarifa } = req.query;
-    if (!tipo_tarifa) {
-        return res.status(400).json({ error: "Debe especificar un 'tipo_tarifa'." });
-    }
-
-    const margenKey = `margen_default_${tipo_tarifa.toLowerCase()}`;
-    const margenAplicado = appConfig[margenKey] !== undefined ? appConfig[margenKey] : 0.3; // Un 30% por defecto si no se encuentra
-
+app.get('/api/tarifas', async (req, res) => {
     try {
-        // Usamos la nueva función que devuelve el stock agrupado
-        const stockAgrupado = await consultarStockParaTarifa();
-
-        const tarifaVentaMateriales = stockAgrupado.map(item => {
-            const costeBase = parseFloat(item.coste_promedio) || 0;
-            const precioVenta = costeBase * (1 + margenAplicado);
-
-            return {
-                material: item.familia,
-                espesor: item.espesor,
-                ancho: item.ancho,
-                coste_metro_lineal: costeBase,
-                margen_aplicado: margenAplicado,
-                precio_venta_metro_lineal: precioVenta
-            };
-        });
-
-        res.json(tarifaVentaMateriales);
+        const tarifas = await consultarTarifas();
+        res.json(tarifas);
     } catch (error) {
-        console.error("Error en GET /api/tarifa-venta:", error.message);
-        res.status(500).json({ error: "Error interno al generar la tarifa de venta.", detalle: error.message });
+        res.status(500).json({ error: 'Error al obtener las tarifas.', detalle: error.message });
     }
 });
-
 
 // AÑADIR este nuevo endpoint en server.js
 app.get('/api/stock/familias-y-espesores', async (req, res) => {
@@ -637,6 +629,33 @@ app.get('/api/stock/familias-y-espesores', async (req, res) => {
     }
 });
 
+// --- Endpoints para el nuevo flujo de Producción ---
+
+// Obtiene los lotes de materia prima compatibles con un producto base
+app.get('/api/stock-compatible/:productoId', async (req, res) => {
+    try {
+        const productoId = parseInt(req.params.productoId, 10);
+        if (isNaN(productoId)) return res.status(400).json({ error: 'ID de producto no válido.' });
+        const lotes = await consultarStockCompatible(productoId);
+        res.json(lotes);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al buscar stock compatible.', detalle: error.message });
+    }
+});
+
+// Crea una nueva orden de producción
+app.post('/api/ordenes-produccion', async (req, res) => {
+    try {
+        const resultado = await crearOrdenProduccion(req.body);
+        res.status(201).json(resultado);
+    } catch (error) {
+        // Si el error es por stock insuficiente, devolvemos un código 409 (Conflicto)
+        if (error.message.includes("Stock insuficiente")) {
+            return res.status(409).json({ error: 'Conflicto de stock.', detalle: error.message });
+        }
+        res.status(500).json({ error: 'Error al crear la orden de producción.', detalle: error.message });
+    }
+});
 
 // AÑADE este nuevo endpoint en server.js, cerca del otro endpoint de /api/stock
 

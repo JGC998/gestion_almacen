@@ -3,38 +3,18 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
-// Rutas
-const almacenDir = path.resolve(__dirname, 'almacen');
-const dbPath = path.resolve(almacenDir, 'almacen.db');
-const configFilePath = path.resolve(__dirname, 'config.json');
+const dbPath = path.resolve(__dirname, 'almacen', 'almacen.db');
 
-// Asegúrate de que el directorio 'almacen' existe
-if (!fs.existsSync(almacenDir)){
-    fs.mkdirSync(almacenDir, { recursive: true });
-}
-
-/**
- * Establece una conexión a la base de datos SQLite.
- * Cada llamada a esta función abre una nueva conexión.
- * Es responsabilidad de la función que la llama cerrar la conexión.
- * @returns {sqlite3.Database} Objeto de la base de datos.
- * @throws {Error} Si no se puede conectar a la base de datos.
- */
-function conectarDB() {
-    const db = new sqlite3.Database(dbPath, (err) => {
-        if (err) {
-            console.error("Error al conectar a la base de datos desde db_operations:", err.message);
-            // No lanzar error aquí, solo loguear. El Promise de la función principal lo manejará.
-        }
-    });
-    // Habilitar claves foráneas (importante para la integridad referencial)
-    db.exec('PRAGMA foreign_keys = ON;', (err) => {
-        if (err) {
-            console.error("Error al habilitar foreign keys en db_operations:", err.message);
-        }
-    });
+const conectarDB = () => {
+    const db = new sqlite3.Database(dbPath, (err) => { if (err) console.error("Error conectando a la DB:", err.message); });
+    db.exec('PRAGMA foreign_keys = ON;');
     return db;
-}
+};
+const runAsync = (db, sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function (err) { if (err) reject(err); else resolve({ lastID: this.lastID, changes: this.changes }); }));
+const getAsync = (db, sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); }));
+const allAsync = (db, sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); }));
+
+
 
 /**
  * Helper para ejecutar una query INSERT/UPDATE/DELETE.
@@ -99,46 +79,6 @@ function getDB(sql, params = []) {
     });
 }
 
-// --- Funciones para transacciones (no cierran la DB, la instancia se pasa) ---
-// Estas son útiles cuando necesitas múltiples operaciones dentro de una única transacción.
-// La función que inicia la transacción es responsable de cerrar la DB.
-
-function runAsync(dbInstance, sql, params = []) {
-    return new Promise((resolve, reject) => {
-        dbInstance.run(sql, params, function(err) {
-            if (err) {
-                console.error('Error ejecutando SQL (transacción run):', sql, params, err.message);
-                return reject(err);
-            }
-            resolve({ lastID: this.lastID, changes: this.changes });
-        });
-    });
-}
-
-function allAsync(dbInstance, sql, params = []) {
-    return new Promise((resolve, reject) => {
-        dbInstance.all(sql, params, (err, rows) => {
-            if (err) {
-                console.error('Error ejecutando SQL (transacción all):', sql, params, err.message);
-                return reject(err);
-            }
-            resolve(rows);
-        });
-    });
-}
-
-function getAsync(dbInstance, sql, params = []) {
-    return new Promise((resolve, reject) => {
-        dbInstance.get(sql, params, (err, row) => {
-            if (err) {
-                console.error('Error ejecutando SQL (transacción get):', sql, params, err.message);
-                return reject(err);
-            }
-            resolve(row || null);
-        });
-    });
-}
-
 
 // En backend-node/db_operations.js
 
@@ -183,6 +123,16 @@ async function consultarStock(filtros = {}) {
 
     sql += ` ORDER BY i.familia, i.descripcion, s.lote`;
     return await allDB(sql, params);
+}
+
+// AÑADE esta nueva función en db_operations.js
+async function consultarFamilias() {
+    const db = conectarDB();
+    try {
+        return await allAsync(db, `SELECT * FROM Familias ORDER BY nombre`);
+    } finally {
+        db.close();
+    }
 }
 
 
@@ -313,160 +263,162 @@ async function insertarLineaPedido(dbInstance, lineaData) {
     return await runAsync(dbInstance, sql, params);
 }
 
-// backend-node/db_operations.js
+async function findOrCreateItem(db, itemInfo) {
+    const { familia, tipo_item, descripcion, sku, atributos } = itemInfo;
+    const familiaRow = await getAsync(db, `SELECT id FROM Familias WHERE nombre = ?`, [familia]);
+    if (!familiaRow) throw new Error(`La familia '${familia}' no existe.`);
 
-// AÑADIR esta nueva función auxiliar al archivo
-async function findOrCreateItem(dbInstance, linea, familia) {
-    // Generamos un SKU estándar para buscar o crear el item
-    const sku = `${familia.toUpperCase()}-${(linea.espesor || 'NA').toUpperCase()}-${(linea.ancho || 'NA')}`;
-    const descripcion = `${familia} ${linea.espesor || ''} Ancho ${linea.ancho || 'N/A'}mm`;
+    // Creamos el Item
+    const itemResult = await runAsync(db, `INSERT INTO Items (sku, descripcion, familia_id, tipo_item) VALUES (?, ?, ?, ?)`, [sku, descripcion, familiaRow.id, tipo_item]);
+    const itemId = itemResult.lastID;
 
-    let item = await getAsync(dbInstance, `SELECT id FROM Items WHERE sku = ?`, [sku]);
-
-    if (item) {
-        return item.id;
-    } else {
-        const result = await runAsync(dbInstance,
-            `INSERT INTO Items (sku, descripcion, tipo_item, familia, espesor, ancho, unidad_medida) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [sku, descripcion, 'MATERIA_PRIMA', familia.toUpperCase(), linea.espesor, parseFloat(linea.ancho) || null, linea.unidad_medida || 'm']
-        );
-        return result.lastID;
+    for (const attr of atributos) {
+        let atributoRow = await getAsync(db, `SELECT id FROM Atributos WHERE nombre = ?`, [attr.nombre]);
+        if (!atributoRow) {
+            const attrResult = await runAsync(db, `INSERT INTO Atributos (nombre) VALUES (?)`, [attr.nombre]);
+            atributoRow = { id: attrResult.lastID };
+        }
+        let valorRow = await getAsync(db, `SELECT id FROM ValoresAtributos WHERE atributo_id = ? AND valor = ?`, [atributoRow.id, attr.valor]);
+        if (!valorRow) {
+            const valorResult = await runAsync(db, `INSERT INTO ValoresAtributos (atributo_id, valor) VALUES (?, ?)`, [atributoRow.id, attr.valor]);
+            valorRow = { id: valorResult.lastID };
+        }
+        await runAsync(db, `INSERT INTO ItemAtributos (item_id, valor_atributo_id) VALUES (?, ?)`, [itemId, valorRow.id]);
     }
+    console.log(`Item '${descripcion}' creado con éxito con ID: ${itemId}`);
+    return itemId;
 }
 
-// REEMPLAZA esta función en db_operations.js
+
 
 async function procesarNuevoPedido(datosCompletosPedido) {
-    // Añadimos 'status' que vendrá desde el payload
-    const { pedido, lineas, gastos, material_tipo_general, status } = datosCompletosPedido;
+    // La función sigue recibiendo todo el payload
+    const { pedido, lineas, gastos, status, material_tipo_general } = datosCompletosPedido;
     const db = conectarDB();
+
+    // --- LÍNEA DE DEFENSA ---
+    // Aseguramos que el estado siempre sea un valor válido, sin importar lo que envíe el frontend.
+    const estadoFinal = (status === 'BORRADOR') ? 'BORRADOR' : 'COMPLETADO';
 
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
+        // Usamos la variable segura 'estadoFinal' en el INSERT
         const pedidoResult = await runAsync(db,
-            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, origen_tipo, valor_conversion, observaciones, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [pedido.numero_factura, pedido.proveedor, pedido.fecha_pedido, pedido.origen_tipo, pedido.valor_conversion, pedido.observaciones, status || 'COMPLETADO']
+            `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, origen_tipo, valor_conversion, status, observaciones) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [pedido.numero_factura, pedido.proveedor, pedido.fecha_pedido, pedido.origen_tipo, pedido.valor_conversion, estadoFinal, pedido.observaciones]
         );
         const pedidoId = pedidoResult.lastID;
         
-        // --- LA LÓGICA DE STOCK SÓLO SE EJECUTA SI EL PEDIDO NO ES UN BORRADOR ---
-        if (status !== 'BORRADOR') {
-            // Lógica de cálculo de costes
+        // El resto de la lógica para gastos, líneas y stock se mantiene igual...
+        for (const gasto of gastos) {
+            await runAsync(db, `INSERT INTO GastosPedido (pedido_id, descripcion, coste_eur, tipo_gasto) VALUES (?, ?, ?, ?)`, 
+                [pedidoId, gasto.descripcion, parseFloat(gasto.coste_eur) || 0, gasto.tipo_gasto]);
+        }
+        
+        if (estadoFinal !== 'BORRADOR') {
             const valorConversion = parseFloat(pedido.valor_conversion) || 1.0;
-            let costeTotalPedidoSinGastosEnEuros = 0;
+            let costeTotalBaseEnEuros = 0;
             lineas.forEach(linea => {
-                const precioUnitario = parseFloat(linea.precio_unitario_original) || 0;
-                const cantidad = parseFloat(linea.cantidad_original) || 0;
-                const precioEnEuros = pedido.origen_tipo === 'CONTENEDOR' ? precioUnitario * valorConversion : precioUnitario;
-                costeTotalPedidoSinGastosEnEuros += cantidad * precioEnEuros * (parseInt(linea.numero_bobinas, 10) || 1);
+                const precioEnEuros = (pedido.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
+                costeTotalBaseEnEuros += linea.metros_por_bobina * linea.cantidad_bobinas * precioEnEuros;
             });
-            let totalGastosRepercutibles = 0;
-            gastos.forEach(gasto => {
-                const tipoGastoUpper = gasto.tipo_gasto?.toUpperCase();
-                if (tipoGastoUpper === 'NACIONAL' || (tipoGastoUpper === 'SUPLIDOS' && !gasto.descripcion?.toUpperCase().includes('IVA'))) {
-                    totalGastosRepercutibles += (parseFloat(gasto.coste_eur) || 0);
-                }
-            });
-            const porcentajeGastos = costeTotalPedidoSinGastosEnEuros > 0 ? totalGastosRepercutibles / costeTotalPedidoSinGastosEnEuros : 0;
+            const totalGastosRepercutibles = gastos.reduce((acc, g) => (g.tipo_gasto || '').toUpperCase() !== 'SUJETO' ? acc + g.coste_eur : acc, 0);
+            const porcentajeGastos = costeTotalBaseEnEuros > 0 ? totalGastosRepercutibles / costeTotalBaseEnEuros : 0;
 
-            // Inserción de líneas y stock
             for (const linea of lineas) {
-                const itemId = await findOrCreateItem(db, linea, material_tipo_general);
-                await insertarLineaPedido(db, { ...linea, item_id: itemId, pedido_id: pedidoId });
+                const itemId = await findOrCreateItem(db, linea.item);
+                await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_bobinas, metros_por_bobina, precio_unitario, moneda) VALUES (?, ?, ?, ?, ?, ?)`,
+                    [pedidoId, itemId, linea.cantidad_bobinas, linea.metros_por_bobina, linea.precio_unitario, linea.moneda]);
                 
-                const costeUnitarioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-                const costeUnitarioEnEuros = pedido.origen_tipo === 'CONTENEDOR' ? costeUnitarioOriginal * valorConversion : costeUnitarioOriginal;
+                const costeUnitarioEnEuros = (pedido.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
                 const costeFinalConGastos = costeUnitarioEnEuros * (1 + porcentajeGastos);
                 
-                const numeroDeBobinas = parseInt(linea.numero_bobinas, 10) || 1;
-                for (let i = 1; i <= numeroDeBobinas; i++) {
-                    const sufijoUnico = numeroDeBobinas > 1 ? `-${i}` : '';
-                    const proveedorLimpio = (pedido.proveedor || 'SIN-PROV').trim().toUpperCase().replace(/\s+/g, '-');
-                    const lote = `${proveedorLimpio}-${(linea.referencia_bobina || 'SIN-REF').trim().replace(/\s+/g, '-')}-P${pedidoId}-I${itemId}${sufijoUnico}`;
+                for (let i = 1; i <= linea.cantidad_bobinas; i++) {
+                    const proveedorLimpio = (pedido.proveedor || 'S-P').trim().toUpperCase().replace(/\s+/g, '-');
+                    const lote = `${proveedorLimpio}-${linea.referencia_bobina || `IT${itemId}`}-P${pedidoId}-${i}`;
 
-                    await runAsync(db,
-                        `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                        [itemId, lote, parseFloat(linea.cantidad_original) || 0, parseFloat(linea.cantidad_original) || 0, costeFinalConGastos, pedidoId, pedido.fecha_pedido]
-                    );
+                    await runAsync(db, `INSERT INTO Stock (lote, item_id, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [lote, itemId, linea.metros_por_bobina, linea.metros_por_bobina, costeFinalConGastos, pedidoId, pedido.fecha_pedido]);
+                    
+                    await actualizarTarifaSiNecesario(db, itemId, costeFinalConGastos);
                 }
             }
         }
         
-        // Los gastos se guardan siempre, tanto en borrador como en completo
-        for (const gasto of gastos) {
-            await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`,
-                [pedidoId, gasto.tipo_gasto, gasto.descripcion, gasto.coste_eur]);
-        }
-
         await runAsync(db, 'COMMIT;');
-        return { pedidoId: pedidoId, mensaje: `Pedido ${pedido.numero_factura} guardado como ${status || 'COMPLETADO'}.` };
-
+        return { pedidoId, mensaje: `Pedido ${pedido.numero_factura} guardado como ${estadoFinal}.` };
     } catch (error) {
-        console.error(`Error en la transacción de procesarNuevoPedido:`, error);
         await runAsync(db, 'ROLLBACK;');
+        console.error("Error en procesarNuevoPedido:", error);
         throw error;
     } finally {
         db.close();
     }
 }
 
+async function generarStockParaPedido(db, pedidoId) {
+    const pedido = await getAsync(db, `SELECT * FROM PedidosProveedores WHERE id = ?`, [pedidoId]);
+    const lineas = await allAsync(db, `SELECT * FROM LineasPedido WHERE pedido_id = ?`, [pedidoId]);
+    const gastos = await allAsync(db, `SELECT * FROM GastosPedido WHERE pedido_id = ?`, [pedidoId]);
 
+    const valorConversion = parseFloat(pedido.valor_conversion) || 1.0;
+    let costeTotalBaseEnEuros = 0;
+    lineas.forEach(linea => {
+        const precioEnEuros = (pedido.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
+        costeTotalBaseEnEuros += linea.metros_por_bobina * linea.cantidad_bobinas * precioEnEuros;
+    });
 
-async function consultarListaPedidos(filtros = {}) {
-    // Se añade la columna status a la selección
-    let sql = `SELECT id, numero_factura, proveedor, fecha_pedido, fecha_llegada, origen_tipo, observaciones, valor_conversion, status
-                    FROM PedidosProveedores`;
-    const params = [];
-    const whereClauses = [];
+    const totalGastosRepercutibles = gastos.reduce((acc, g) => (g.tipo_gasto || '').toUpperCase() !== 'SUJETO' ? acc + g.coste_eur : acc, 0);
+    const porcentajeGastos = costeTotalBaseEnEuros > 0 ? totalGastosRepercutibles / costeTotalBaseEnEuros : 0;
 
+    for (const linea of lineas) {
+        const costeUnitarioEnEuros = (pedido.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
+        const costeFinalConGastos = costeUnitarioEnEuros * (1 + porcentajeGastos);
 
-    // --- AÑADIMOS FILTRO POR ESTADO ---
-    if (filtros.status) {
-        whereClauses.push(`status = ?`);
-        params.push(filtros.status.toUpperCase());
-    } else {
-        // Por defecto, si no se especifica un estado, no mostramos los borradores
-        whereClauses.push(`status != 'BORRADOR'`);
-    }
+        for (let i = 1; i <= linea.cantidad_bobinas; i++) {
+            const proveedorLimpio = (pedido.proveedor || 'S-P').trim().toUpperCase().replace(/\s+/g, '-');
+            const lote = `${proveedorLimpio}-P${pedidoId}-I${linea.item_id}-${i}`;
 
-    if (filtros.origen_tipo) {
-        whereClauses.push(`origen_tipo = ?`);
-        params.push(filtros.origen_tipo.toUpperCase());
+            await runAsync(db, `INSERT INTO Stock (lote, item_id, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [lote, linea.item_id, linea.metros_por_bobina, linea.metros_por_bobina, costeFinalConGastos, pedidoId, pedido.fecha_pedido]);
+            
+            await actualizarTarifaSiNecesario(db, linea.item_id, costeFinalConGastos);
+        }
     }
-    if (filtros.proveedor_like) {
-        whereClauses.push(`proveedor LIKE ?`);
-        params.push(`%${filtros.proveedor_like}%`);
-    }
-    if (filtros.factura_like) {
-        whereClauses.push(`numero_factura LIKE ?`);
-        params.push(`%${filtros.factura_like}%`);
-    }
-    if (filtros.fecha_pedido_desde) {
-        whereClauses.push(`fecha_pedido >= ?`);
-        params.push(filtros.fecha_pedido_desde);
-    }
-    if (filtros.fecha_pedido_hasta) {
-        whereClauses.push(`fecha_pedido <= ?`);
-        params.push(filtros.fecha_pedido_hasta);
-    }
-
-    if (whereClauses.length > 0) {
-        sql += ` WHERE ${whereClauses.join(' AND ')}`;
-    }
-    
-    sql += ` ORDER BY fecha_pedido DESC, id DESC`;
-
-    return await allDB(sql, params);
 }
 
-async function consultarInfoPedidoPorId(dbInstance, pedidoId) {
-    return getAsync(dbInstance, `SELECT * FROM PedidosProveedores WHERE id = ?`, [pedidoId]);
+
+// REEMPLAZA esta función en db_operations.js
+
+async function actualizarTarifaSiNecesario(db, itemId, nuevoCosteCompra) {
+    // Leemos los márgenes desde el archivo de configuración
+    const configuraciones = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
+    const tiposDeTarifa = [
+        { key: 'FINAL', margen: configuraciones.margen_default_final },
+        { key: 'FABRICANTE', margen: configuraciones.margen_default_fabricante },
+        { key: 'INTERMEDIARIO', margen: configuraciones.margen_default_intermediario },
+        { key: 'METRAJES', margen: configuraciones.margen_default_metrajes }
+    ];
+
+    for (const tarifa of tiposDeTarifa) {
+        const tarifaActual = await getAsync(db, `SELECT ultimo_coste_compra FROM Tarifas WHERE item_id = ? AND tipo_tarifa = ?`, [itemId, tarifa.key]);
+        
+        // Solo actualizamos si el nuevo coste es mayor, o si la tarifa no existe
+        if (!tarifaActual || nuevoCosteCompra > tarifaActual.ultimo_coste_compra) {
+            const nuevoPrecioVenta = nuevoCosteCompra * (1 + tarifa.margen);
+            
+            // Usamos INSERT OR REPLACE (UPSERT) para insertar si no existe, o reemplazar si ya existe.
+            await runAsync(db, 
+                `INSERT OR REPLACE INTO Tarifas (item_id, tipo_tarifa, precio_venta, ultimo_coste_compra, fecha_actualizacion) 
+                 VALUES (?, ?, ?, ?, ?)`,
+                [itemId, tarifa.key, nuevoPrecioVenta, nuevoCosteCompra, new Date().toISOString()]
+            );
+            console.log(`Tarifa [${tarifa.key}] para Item ${itemId} actualizada a ${nuevoPrecioVenta.toFixed(2)}€`);
+        }
+    }
 }
 
-async function consultarGastosPorPedidoId(dbInstance, pedidoId) {
-    return allAsync(dbInstance, `SELECT id, tipo_gasto, descripcion, coste_eur FROM GastosPedido WHERE pedido_id = ? ORDER BY id`, [pedidoId]);
-}
 
 
 
@@ -511,44 +463,80 @@ async function consultarStockPorPedidoId(dbInstance, pedidoId) {
 // AÑADE esta nueva función en db_operations.js
 
 // REEMPLAZA esta función en db_operations.js
+// En db_operations.js, REEMPLAZA la función consultarStockAgrupado
 
 async function consultarStockAgrupado(filtros = {}) {
-    // La consulta ahora agrupa también por el largo inicial (cantidad_inicial)
-    let sql = `
-        SELECT
-            i.familia,
-            i.espesor,
-            i.ancho,
-            s.cantidad_inicial AS largo,
-            AVG(s.coste_lote) AS coste_compra_final,
-            COUNT(s.id) AS numero_bobinas
-        FROM Stock s
-        JOIN Items i ON s.item_id = i.id
-        WHERE i.tipo_item = 'MATERIA_PRIMA' 
-          AND s.cantidad_actual > 0 
-    `;
-    const params = [];
-    
-    if (filtros.familia) {
-        sql += ` AND i.familia = ?`;
-        params.push(filtros.familia.toUpperCase());
+    const db = conectarDB();
+    try {
+        let sql = `
+            SELECT
+                i.id AS item_id,
+                i.sku,
+                i.descripcion,
+                f.nombre AS familia,
+                SUM(s.cantidad_actual) AS cantidad_total,
+                COUNT(s.id) AS numero_lotes,
+                (
+                    SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ')
+                    FROM ItemAtributos ia
+                    JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id
+                    JOIN Atributos a ON va.atributo_id = a.id
+                    WHERE ia.item_id = i.id
+                ) as atributos
+            FROM Stock s
+            JOIN Items i ON s.item_id = i.id
+            JOIN Familias f ON i.familia_id = f.id
+            WHERE s.cantidad_actual > 0 AND i.tipo_item = 'MATERIA_PRIMA'
+        `;
+        const params = [];
+
+        if (filtros.familia) {
+            sql += ` AND f.nombre = ?`;
+            params.push(filtros.familia.toUpperCase());
+        }
+
+        sql += ` GROUP BY i.id, i.sku, i.descripcion, f.nombre ORDER BY f.nombre, i.descripcion`;
+        
+        return await allAsync(db, sql, params);
+    } finally {
+        db.close();
     }
-
-    sql += ` 
-        GROUP BY 
-            i.familia,
-            i.espesor,
-            i.ancho,
-            s.cantidad_inicial -- Agrupamos por largo inicial
-        ORDER BY 
-            i.familia, i.espesor, i.ancho, largo
-    `;
-    
-    return await allDB(sql, params);
 }
-
-
 // REEMPLAZA esta función en db_operations.js
+
+// En db_operations.js, REEMPLAZA estas dos funciones.
+// Si ya existen, bórralas y pega estas en su lugar.
+
+async function consultarListaPedidos(filtros = {}) {
+    const db = conectarDB();
+    try {
+        let sql = `SELECT * FROM PedidosProveedores`;
+        const params = [];
+        let whereClauses = [];
+
+        if (filtros.status) {
+            whereClauses.push(`status = ?`);
+            params.push(filtros.status.toUpperCase());
+        }
+
+        if (filtros.origen_tipo) {
+            whereClauses.push(`origen_tipo = ?`);
+            params.push(filtros.origen_tipo.toUpperCase());
+        }
+        if (filtros.proveedor_like) {
+            whereClauses.push(`proveedor LIKE ?`);
+            params.push(`%${filtros.proveedor_like}%`);
+        }
+        
+        if (whereClauses.length > 0) {
+            sql += ` WHERE ${whereClauses.join(' AND ')}`;
+        }
+        sql += ` ORDER BY fecha_pedido DESC, id DESC`;
+        return await allAsync(db, sql, params);
+    } finally {
+        db.close();
+    }
+}
 
 async function obtenerDetallesCompletosPedido(pedidoId) {
     const db = conectarDB();
@@ -558,59 +546,48 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
 
         const gastos = await allAsync(db, `SELECT * FROM GastosPedido WHERE pedido_id = ?`, [pedidoId]);
         
-        // Obtenemos las líneas de pedido originales y las agrupamos por tipo de item
-        const lineasOriginales = await allAsync(db, `
-            SELECT 
-                i.familia, i.espesor, i.ancho,
-                lp.cantidad_original AS largo,
-                lp.precio_unitario_original,
-                lp.moneda_original,
-                COUNT(lp.id) as numero_bobinas
+        const lineasConDetalles = await allAsync(db, `
+            SELECT
+                lp.cantidad_bobinas,
+                lp.metros_por_bobina,
+                lp.precio_unitario,
+                lp.moneda,
+                i.descripcion,
+                f.nombre as familia,
+                (
+                    SELECT GROUP_CONCAT(va.valor, '; ')
+                    FROM ItemAtributos ia
+                    JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id
+                    JOIN Atributos a ON va.atributo_id = a.id
+                    WHERE ia.item_id = lp.item_id
+                ) as atributos
             FROM LineasPedido lp
             JOIN Items i ON lp.item_id = i.id
+            JOIN Familias f ON i.familia_id = f.id
             WHERE lp.pedido_id = ?
-            GROUP BY i.familia, i.espesor, i.ancho, lp.cantidad_original, lp.precio_unitario_original, lp.moneda_original
         `, [pedidoId]);
 
-        // Calculamos los costes y sumas para la cabecera
+        // Lógica de cálculo de costes
         const valorConversion = parseFloat(pedidoInfo.valor_conversion) || 1.0;
         let costeTotalBaseEnEuros = 0;
-        let resumenGastos = {};
-
-        gastos.forEach(gasto => {
-            const coste = parseFloat(gasto.coste_eur) || 0;
-            if (pedidoInfo.origen_tipo === 'CONTENEDOR') {
-                const tipo = gasto.tipo_gasto.toUpperCase();
-                if (!resumenGastos[tipo]) resumenGastos[tipo] = 0;
-                resumenGastos[tipo] += coste;
-            } else {
-                if (!resumenGastos['Total Gastos']) resumenGastos['Total Gastos'] = 0;
-                resumenGastos['Total Gastos'] += coste;
-            }
+        lineasConDetalles.forEach(linea => {
+            const precioEnEuros = (pedidoInfo.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
+            costeTotalBaseEnEuros += linea.metros_por_bobina * linea.cantidad_bobinas * precioEnEuros;
         });
-
-        const lineasDetalladas = lineasOriginales.map(linea => {
-            const precioOriginal = parseFloat(linea.precio_unitario_original) || 0;
-            const precioEnEuros = pedidoInfo.origen_tipo === 'CONTENEDOR' ? precioOriginal * valorConversion : precioOriginal;
-            costeTotalBaseEnEuros += (precioEnEuros * parseFloat(linea.largo) * linea.numero_bobinas);
-            return { ...linea, precio_sin_gastos: precioEnEuros };
-        });
-
-        const totalGastosRepercutibles = Object.values(resumenGastos).reduce((a, b) => a + b, 0);
+        const totalGastosRepercutibles = gastos.reduce((acc, g) => (g.tipo_gasto || '').toUpperCase() !== 'SUJETO' ? acc + g.coste_eur : acc, 0);
         const porcentajeGastos = costeTotalBaseEnEuros > 0 ? totalGastosRepercutibles / costeTotalBaseEnEuros : 0;
 
-        // Añadimos el precio con gastos a cada línea
-        lineasDetalladas.forEach(linea => {
-            linea.precio_con_gastos = linea.precio_sin_gastos * (1 + porcentajeGastos);
+        lineasConDetalles.forEach(linea => {
+            const precioEnEuros = (pedidoInfo.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
+            linea.precio_sin_gastos = precioEnEuros;
+            linea.precio_con_gastos = precioEnEuros * (1 + porcentajeGastos);
         });
 
-        // El objeto final que se enviará al frontend
-        return { 
-            pedidoInfo, 
+        return {
+            pedidoInfo,
             gastos,
-            lineasDetalladas,
-            resumenGastos,
-            porcentajeGastos, // <-- AÑADIR ESTA LÍNEA
+            lineasDetalladas: lineasConDetalles,
+            porcentajeGastos
         };
 
     } catch (error) {
@@ -618,6 +595,158 @@ async function obtenerDetallesCompletosPedido(pedidoId) {
         throw error;
     } finally {
         if (db) db.close();
+    }
+}
+// AÑADE estas dos nuevas funciones en db_operations.js
+
+/**
+ * Busca en el stock los lotes de materia prima que son compatibles con un producto base.
+ * La compatibilidad se basa en la familia del material.
+ * @param {number} productoBaseId - El ID del Item (producto base) que se quiere fabricar.
+ * @returns {Promise<Array>} Una lista de lotes de stock compatibles.
+ */
+async function consultarStockCompatible(productoBaseId) {
+    const db = conectarDB();
+    try {
+        // 1. Obtenemos la familia del producto base que queremos fabricar.
+        const productoBase = await getAsync(db, `SELECT familia_id FROM Items WHERE id = ?`, [productoBaseId]);
+        if (!productoBase) throw new Error("Producto base no encontrado.");
+
+        // 2. Buscamos todos los lotes en stock que pertenezcan a esa misma familia y tengan stock.
+        const sql = `
+            SELECT
+                s.id,
+                s.lote,
+                s.cantidad_actual,
+                s.coste_lote,
+                i.descripcion,
+                (
+                    SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ')
+                    FROM ItemAtributos ia
+                    JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id
+                    JOIN Atributos a ON va.atributo_id = a.id
+                    WHERE ia.item_id = s.item_id
+                ) as atributos
+            FROM Stock s
+            JOIN Items i ON s.item_id = i.id
+            WHERE i.familia_id = ? AND s.cantidad_actual > 0 AND i.tipo_item = 'MATERIA_PRIMA'
+            ORDER BY s.fecha_entrada;
+        `;
+        return await allAsync(db, sql, [productoBase.familia_id]);
+    } finally {
+        db.close();
+    }
+}
+
+
+/**
+ * Crea una nueva orden de producción, calcula costes y descuenta el material del stock.
+ * @param {object} ordenData - Los datos de la orden enviados desde el frontend.
+ * @returns {Promise<object>} El resultado de la operación.
+ */
+async function crearOrdenProduccion(ordenData) {
+    const { producto_base_id, lote_materia_prima_id, ancho_producido, largo_producido, cantidad_producida, observaciones } = ordenData;
+    const db = conectarDB();
+    try {
+        await runAsync(db, 'BEGIN TRANSACTION;');
+
+        // 1. Obtener datos de la bobina de materia prima que vamos a usar.
+        const loteMateriaPrima = await getAsync(db, `SELECT * FROM Stock WHERE id = ?`, [lote_materia_prima_id]);
+        if (!loteMateriaPrima) throw new Error("El lote de materia prima seleccionado no existe.");
+
+        const itemMateriaPrima = await getAsync(db, `SELECT * FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = ? AND a.nombre = 'Ancho'`, [loteMateriaPrima.item_id]);
+        const anchoBobinaMM = itemMateriaPrima ? parseInt(itemMateriaPrima.valor, 10) : 0;
+        if (anchoBobinaMM === 0) throw new Error("No se pudo determinar el ancho de la bobina de materia prima.");
+
+        // 2. Calcular el consumo de material.
+        const anchoBobinaMetros = anchoBobinaMM / 1000;
+        const metrosCuadradosPorPieza = (ancho_producido / 1000) * (largo_producido / 1000);
+        const metrosLinealesConsumidosPorPieza = metrosCuadradosPorPieza / anchoBobinaMetros;
+        const totalMetrosLinealesAConsumir = metrosLinealesConsumidosPorPieza * cantidad_producida;
+
+        if (loteMateriaPrima.cantidad_actual < totalMetrosLinealesAConsumir) {
+            throw new Error(`Stock insuficiente en el lote ${loteMateriaPrima.lote}. Necesario: ${totalMetrosLinealesAConsumir.toFixed(2)}m, Disponible: ${loteMateriaPrima.cantidad_actual.toFixed(2)}m.`);
+        }
+
+        // 3. Calcular el coste de la producción.
+        const costeMaterial = totalMetrosLinealesAConsumir * loteMateriaPrima.coste_lote;
+        // Aquí se añadiría el coste de procesos si fuera necesario. Por ahora, es solo el material.
+        const costeTotalProduccion = costeMaterial;
+        
+        // 4. Actualizar (descontar) el stock de la materia prima.
+        const nuevaCantidad = loteMateriaPrima.cantidad_actual - totalMetrosLinealesAConsumir;
+        await runAsync(db, `UPDATE Stock SET cantidad_actual = ? WHERE id = ?`, [nuevaCantidad, lote_materia_prima_id]);
+
+        // 5. Insertar el registro de la nueva orden de producción.
+        const result = await runAsync(db,
+            `INSERT INTO OrdenesProduccion (producto_base_id, lote_materia_prima_id, ancho_producido, largo_producido, cantidad_producida, coste_total_produccion, fecha_creacion, observaciones) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [producto_base_id, lote_materia_prima_id, ancho_producido, largo_producido, cantidad_producida, costeTotalProduccion, new Date().toISOString(), observaciones]
+        );
+
+        await runAsync(db, 'COMMIT;');
+        return { id: result.lastID, mensaje: `Orden de producción #${result.lastID} creada con éxito.` };
+
+    } catch (error) {
+        await runAsync(db, 'ROLLBACK;');
+        console.error("Error creando orden de producción:", error);
+        throw error;
+    } finally {
+        db.close();
+    }
+}
+
+
+// REEMPLAZA la función consultarTarifas en db_operations.js
+
+async function consultarTarifas() {
+    const db = conectarDB();
+    try {
+        // 1. Leemos los márgenes de configuración
+        const configuraciones = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'config.json'), 'utf8'));
+        const margenes = {
+            FINAL: configuraciones.margen_default_final || 0,
+            FABRICANTE: configuraciones.margen_default_fabricante || 0,
+            INTERMEDIARIO: configuraciones.margen_default_intermediario || 0,
+            METRAJES: configuraciones.margen_default_metrajes || 0,
+        };
+
+        // 2. Obtenemos todos los items de materia prima con su último coste de stock
+        const itemsConCoste = await allAsync(db, `
+            SELECT
+                i.id,
+                i.sku,
+                i.descripcion,
+                (SELECT coste_lote FROM Stock WHERE item_id = i.id ORDER BY fecha_entrada DESC, id DESC LIMIT 1) as ultimo_coste_compra,
+                (
+                    SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ')
+                    FROM ItemAtributos ia
+                    JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id
+                    JOIN Atributos a ON va.atributo_id = a.id
+                    WHERE ia.item_id = i.id
+                ) as atributos
+            FROM Items i
+            WHERE i.tipo_item = 'MATERIA_PRIMA' AND EXISTS (SELECT 1 FROM Stock s WHERE s.item_id = i.id);
+        `);
+
+        // 3. Calculamos todos los precios para cada item
+        const tarifasCompletas = itemsConCoste.map(item => {
+            const coste = item.ultimo_coste_compra || 0;
+            return {
+                id: item.id,
+                sku: item.sku,
+                descripcion: item.descripcion,
+                atributos: item.atributos,
+                precio_final: coste * (1 + margenes.FINAL),
+                precio_fabricante: coste * (1 + margenes.FABRICANTE),
+                precio_intermediario: coste * (1 + margenes.INTERMEDIARIO),
+                precio_metrajes: coste * (1 + margenes.METRAJES),
+            };
+        });
+
+        return tarifasCompletas;
+
+    } finally {
+        db.close();
     }
 }
 
@@ -686,76 +815,66 @@ async function eliminarPedidoCompleto(pedidoId) {
     }
 }
 
-async function insertarProductoTerminado(productoData) {
-    const { nombre, unidad_medida, coste_fabricacion_estandar, status, material_principal, espesor_principal, ancho_final, largo_final } = productoData;
-    
-    // Generamos un SKU estándar para buscar o crear el item
-    const sku = `PT-${nombre.toUpperCase().replace(/\s+/g, '-')}`;
 
-    // Ahora inserta en la tabla 'Items'
-    const query = `INSERT INTO Items (
-        sku, descripcion, tipo_item, unidad_medida, coste_estandar, status,
-        familia, espesor, ancho
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-    const params = [
-        sku,
-        nombre,
-        'PRODUCTO_TERMINADO',
-        unidad_medida || 'unidad',
-        parseFloat(coste_fabricacion_estandar) || 0,
-        status || 'ACTIVO',
-        material_principal,
-        espesor_principal,
-        largo_final ? (parseFloat(ancho_final) || null) : (parseFloat(ancho_final) || null) // Asumiendo ancho_final tambien para largo
-    ];
-
+// --- Lógica de Artículos (Productos Terminados) ---
+async function insertarProductoTerminado(datosItem) {
+    const db = conectarDB();
     try {
-        // Usamos runDB que maneja la conexión y cierre automáticamente
-        const result = await runDB(query, params);
-        return result.lastID;
-    } catch (err) {
-        console.error("Error al insertar producto terminado (como item):", err.message);
-        if (err.message.includes("UNIQUE constraint failed: Items.sku")) {
-            throw new Error(`Ya existe una plantilla de producto con un SKU derivado del nombre '${nombre}'.`);
-        }
-        throw err;
-    }
-}
-
-
-
-// backend-node/db_operations.js
-// ...
-
-// backend-node/db_operations.js
-// ... (otras funciones como allDB)
-
-async function consultarProductosTerminados(filtros = {}) {
-    // Ahora consulta la tabla 'Items' filtrando por tipo
-    let query = `SELECT 
-                    id, 
-                    sku as referencia, 
-                    descripcion as nombre, 
-                    unidad_medida, 
-                    coste_estandar as coste_fabricacion_estandar, 
-                    status,
-                    familia as material_principal, 
-                    espesor as espesor_principal, 
-                    ancho as ancho_final
-                 FROM Items 
-                 WHERE tipo_item = 'PRODUCTO_TERMINADO'`;
-    const params = [];
-    // ... (la lógica de filtros se puede añadir aquí si es necesario)
-    query += ` ORDER BY nombre ASC`;
-
-    try {
-        return await allDB(query, params);
+        await runAsync(db, 'BEGIN TRANSACTION;');
+        const itemId = await findOrCreateItem(db, { ...datosItem, tipo_item: 'PRODUCTO_TERMINADO' });
+        await runAsync(db, 'COMMIT;');
+        return itemId;
     } catch (error) {
-        console.error("Error al consultar productos terminados (ahora items):", error.message);
+        await runAsync(db, 'ROLLBACK;');
         throw error;
+    } finally {
+        db.close();
     }
 }
+
+
+async function consultarProductosTerminados() {
+    const db = conectarDB();
+    try {
+        const sql = `
+            SELECT i.id, i.sku, i.descripcion, f.nombre as familia,
+                   (SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ') FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id) as atributos
+            FROM Items i
+            JOIN Familias f ON i.familia_id = f.id
+            WHERE i.tipo_item = 'PRODUCTO_TERMINADO'
+            GROUP BY i.id ORDER BY i.sku;
+        `;
+        return await allAsync(db, sql);
+    } finally {
+        db.close();
+    }
+}
+
+/**
+ * Elimina un producto terminado (Item).
+ */
+async function eliminarProductoTerminado(id) {
+    const db = conectarDB();
+    try {
+        const result = await runAsync(db, `DELETE FROM Items WHERE id = ? AND tipo_item = 'PRODUCTO_TERMINADO'`, [id]);
+        if (result.changes === 0) throw new Error('Producto terminado no encontrado.');
+        return result.changes;
+    } catch (error) {
+        console.error("Error eliminando producto terminado:", error);
+        throw error;
+    } finally {
+        db.close();
+    }
+}
+
+// No olvides añadir/actualizar estas funciones en tu module.exports
+// module.exports = {
+//     ...,
+//     insertarProductoTerminado,
+//     consultarProductosTerminados,
+//     eliminarProductoTerminado,
+//     ...
+// }
 
 
 
@@ -865,18 +984,6 @@ async function calcularCosteMaterialEspecifico(material_tipo, espesor, ancho_pro
     return parseFloat(costeFinalCalculado.toFixed(4));
 }
 
-async function eliminarProductoTerminado(id) {
-    const sql = `DELETE FROM ProductosTerminados WHERE id = ?`;
-    try {
-        const result = await runDB(sql, [id]);
-        if (result.changes === 0) {
-            throw new Error(`No se encontró ProductoTerminado con ID ${id} para eliminar.`);
-        }
-        return result.changes;
-    } catch (error) {
-        throw error;
-    }
-}
 
 
 // En backend-node/db_operations.js
@@ -1860,26 +1967,40 @@ async function consultarItems(filtros = {}) {
 
 // En backend-node/db_operations.js
 
-async function crearItem(itemData) {
-    const sql = `INSERT INTO Items (sku, descripcion, tipo_item, familia, espesor, ancho, unidad_medida) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-    const params = [
-        itemData.sku,
-        itemData.descripcion,
-        itemData.tipo_item,
-        itemData.familia || null,
-        itemData.espesor || null,
-        itemData.ancho || null,
-        itemData.unidad_medida
-    ];
-    try {
-        const result = await runDB(sql, params);
-        return { id: result.lastID };
-    } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT' && error.message.includes('Items.sku')) {
-            throw new Error(`El SKU '${itemData.sku}' ya existe.`);
-        }
-        throw error;
+
+async function findOrCreateAtributo(db, nombre) {
+    let row = await getAsync(db, `SELECT id FROM Atributos WHERE nombre = ?`, [nombre]);
+    if (row) return row.id;
+    const result = await runAsync(db, `INSERT INTO Atributos (nombre) VALUES (?)`, [nombre]);
+    return result.lastID;
+}
+
+async function findOrCreateValorAtributo(db, atributo_id, valor) {
+    let row = await getAsync(db, `SELECT id FROM ValoresAtributos WHERE atributo_id = ? AND valor = ?`, [atributo_id, valor]);
+    if (row) return row.id;
+    const result = await runAsync(db, `INSERT INTO ValoresAtributos (atributo_id, valor) VALUES (?, ?)`, [atributo_id, valor]);
+    return result.lastID;
+}
+
+async function crearItem(db, datosItem) {
+    const { sku, descripcion, familia, tipo_item, atributos } = datosItem;
+    
+    const familiaRow = await getAsync(db, `SELECT id FROM Familias WHERE nombre = ?`, [familia]);
+    if (!familiaRow) throw new Error(`Familia '${familia}' no encontrada.`);
+
+    const result = await runAsync(db, 
+        `INSERT INTO Items (sku, descripcion, familia_id, tipo_item) VALUES (?, ?, ?, ?)`,
+        [sku, descripcion, familiaRow.id, tipo_item]
+    );
+    const itemId = result.lastID;
+
+    for (const attr of atributos) {
+        const atributoId = await findOrCreateAtributo(db, attr.nombre);
+        const valorId = await findOrCreateValorAtributo(db, atributoId, attr.valor);
+        await runAsync(db, `INSERT INTO ItemAtributos (item_id, valor_atributo_id) VALUES (?, ?)`, [itemId, valorId]);
     }
+
+    return itemId;
 }
 
 
@@ -2005,7 +2126,6 @@ async function actualizarYFinalizarPedido(pedidoId, datosNuevos) {
 module.exports = {
     consultarStock,
     consultarStockPorPedidoId,
-    procesarNuevoPedido,
     consultarListaPedidos,
     obtenerDetallesCompletosPedido,
     actualizarEstadoStockItem,
@@ -2062,10 +2182,20 @@ module.exports = {
     consultarStockParaTarifa,
     insertarPedidoProveedor,
 
-        
-    consultarProveedoresUnicos,
+    consultarStockCompatible,
+    crearOrdenProduccion,
+
+    findOrCreateItem,
+    procesarNuevoPedido,
+    
 
     crearItem,
+    procesarNuevoPedido,
+    consultarTarifas,
+
+        
+    consultarProveedoresUnicos,
+    consultarFamilias,
 
     consultarItems,
 

@@ -4,7 +4,6 @@ import './FormularioPedido.css';
 
 function FormularioPedidoNacional() {
     const [pedido, setPedido] = useState({
-        familia_pedido: 'GOMA',
         numero_factura: '',
         proveedor: '',
         fecha_pedido: new Date().toISOString().split('T')[0],
@@ -12,122 +11,117 @@ function FormularioPedidoNacional() {
     });
 
     const [lineas, setLineas] = useState([
-        { id: Date.now(), referencia_bobina: '', tipo_espesor: '', ancho: '', largo: '', precio_unitario_original: '', numero_bobinas: 1 }
+        { id: Date.now(), familia: 'GOMA', espesor: '', ancho: '', largo: '', precio_unitario: '', numero_bobinas: 1, referencia_bobina: '' }
     ]);
-
+    
     const [gastos, setGastos] = useState([]);
+    const [familias, setFamilias] = useState([]);
     const [proveedores, setProveedores] = useState([]);
     const [facturaError, setFacturaError] = useState('');
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
+    const [loading, setLoading] = useState(false);
 
-    const tiposEspesorPorFamilia = {
-        'GOMA': ['6mm', '8mm', '10mm', '12mm', '15mm'],
-        'PVC': ['Blanco2mm', 'Blanco3mm', 'Verde2mm', 'Verde3mm', 'Azul2mm', 'Azul3mm'],
-        'FIELTRO': ['Fieltro10', 'Fieltro15'],
-        'CARAMELO': ['6mm', '8mm', '10mm', '12mm'],
-        'VERDE': ['6mm', '8mm', '10mm', '12mm'],
-        'NEGRA': ['6mm', '8mm', '10mm', '12mm'],
-    };
-
-    // --- Cargar proveedores para autocompletar ---
     useEffect(() => {
-        const fetchProveedores = async () => {
+        const fetchData = async () => {
             try {
-                const response = await fetch('http://localhost:5002/api/proveedores');
-                if (!response.ok) throw new Error('No se pudo cargar la lista de proveedores');
-                const data = await response.json();
-                setProveedores(data);
+                const familiasRes = await fetch('http://localhost:5002/api/familias');
+                if (!familiasRes.ok) throw new Error('No se pudieron cargar las familias');
+                const familiasData = await familiasRes.json();
+                setFamilias(familiasData);
+                
+                const proveedoresRes = await fetch('http://localhost:5002/api/proveedores');
+                if (!proveedoresRes.ok) throw new Error('No se pudo cargar la lista de proveedores');
+                setProveedores(await proveedoresRes.json());
             } catch (err) {
                 console.error(err);
+                setError(err.message);
             }
         };
-        fetchProveedores();
+        fetchData();
     }, []);
 
     const handlePedidoChange = (e) => {
         const { name, value } = e.target;
         setPedido(prev => ({ ...prev, [name]: value }));
         if (name === 'numero_factura') {
-            setFacturaError(''); // Limpiar el error al cambiar
+            setFacturaError('');
+            setError(null);
         }
     };
-
-    // --- Validar factura al perder el foco ---
+    
     const handleFacturaBlur = async (e) => {
-        const numeroFactura = e.target.value;
-        if (!numeroFactura) {
-            setFacturaError('');
-            return;
-        }
+        const numeroFactura = e.target.value.trim();
+        if (!numeroFactura) return setFacturaError('');
         try {
             const response = await fetch(`http://localhost:5002/api/pedidos/verificar-factura?numero=${numeroFactura}`);
             const data = await response.json();
-            if (data.existe) {
-                setFacturaError('¡Atención! Este número de factura ya existe en la base de datos.');
-            } else {
-                setFacturaError('');
-            }
-        } catch (err) {
-            console.error(err);
-            setFacturaError('No se pudo verificar la factura.');
-        }
+            if (data.existe) setFacturaError('¡Atención! Este número de factura ya existe.');
+            else setFacturaError('');
+        } catch (err) { setFacturaError('No se pudo verificar la factura.'); }
     };
 
-    const addLinea = () => {
-        setLineas(prev => [...prev, { id: Date.now(), referencia_bobina: '', tipo_espesor: '', ancho: '', largo: '', precio_unitario_original: '', numero_bobinas: 1 }]);
-    };
-
-    const removeLinea = (id) => {
-        if (lineas.length > 1) {
-            setLineas(prev => prev.filter(l => l.id !== id));
-        }
-    };
-
+    const addLinea = () => setLineas(prev => [...prev, { id: Date.now(), familia: familias[0]?.nombre || '', espesor: '', ancho: '', largo: '', precio_unitario: '', numero_bobinas: 1, referencia_bobina: '' }]);
+    const removeLinea = (id) => { if (lineas.length > 1) setLineas(prev => prev.filter(l => l.id !== id)) };
     const handleLineaChange = (id, e) => {
         const { name, value } = e.target;
         setLineas(prev => prev.map(l => l.id === id ? { ...l, [name]: value } : l));
     };
-
-    const addGasto = () => {
-        setGastos(prev => [...prev, { id: Date.now(), descripcion: '', coste_eur: '' }]);
-    };
-
-    const removeGasto = (id) => {
-        setGastos(prev => prev.filter(g => g.id !== id));
-    };
-
+    const addGasto = () => setGastos(prev => [...prev, { id: Date.now(), descripcion: '', coste_eur: '' }]);
+    const removeGasto = (id) => setGastos(prev => prev.filter(g => g.id !== id));
     const handleGastoChange = (id, e) => {
         const { name, value } = e.target;
         setGastos(prev => prev.map(g => g.id === id ? { ...g, [name]: value } : g));
     };
 
+    // REEMPLAZA la función handleSubmit entera en tu archivo
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError(null);
         setSuccess(null);
+        setLoading(true);
+
         if (facturaError) {
-            setError('Por favor, corrija los errores antes de guardar.');
+            setError('Por favor, corrija los errores del formulario.');
+            setLoading(false);
             return;
         }
 
-        // Pre-cálculo del porcentaje de gastos para enviar al backend
-        const totalGastos = gastos.reduce((acc, g) => acc + (parseFloat(g.coste_eur) || 0), 0);
-        const totalMateriales = lineas.reduce((acc, l) => acc + ((parseFloat(l.largo) || 0) * (parseFloat(l.precio_unitario_original) || 0) * (parseInt(l.numero_bobinas, 10) || 1)), 0);
-        const porcentajeGastos = totalMateriales > 0 ? totalGastos / totalMateriales : 0;
+        const lineasParaEnviar = lineas.map(l => {
+            const sku = `${l.familia}-${l.espesor.replace('mm','')}-${l.ancho}`;
+            const descripcion = `${l.familia} ${l.espesor} ${l.ancho}mm`;
 
-        const lineasParaEnviar = lineas.map(l => ({
-            ...l,
-            cantidad_original: l.largo,
-            espesor: l.tipo_espesor
-        }));
+            return {
+                referencia_bobina: l.referencia_bobina,
+                cantidad_bobinas: parseInt(l.numero_bobinas, 10),
+                metros_por_bobina: parseFloat(l.largo),
+                precio_unitario: parseFloat(l.precio_unitario),
+                moneda: 'EUR',
+                item: {
+                    sku,
+                    descripcion,
+                    familia: l.familia,
+                    tipo_item: 'MATERIA_PRIMA',
+                    atributos: [
+                        { nombre: 'Espesor', valor: l.espesor },
+                        { nombre: 'Ancho', valor: `${l.ancho}mm` }
+                    ]
+                }
+            };
+        });
         
+        // --- PAYLOAD CORREGIDO Y COMPLETO ---
         const payload = {
-            pedido: { ...pedido, origen_tipo: 'NACIONAL', porcentajeGastos },
+            pedido: { ...pedido, origen_tipo: 'NACIONAL' },
             lineas: lineasParaEnviar,
-            gastos: gastos.map(g => ({ ...g, tipo_gasto: 'NACIONAL' })),
-            material_tipo_general: pedido.familia_pedido
+            gastos: gastos.map(g => ({ ...g, tipo_gasto: 'NACIONAL', coste_eur: parseFloat(g.coste_eur) })),
+            status: 'COMPLETADO',
+            material_tipo_general: lineas[0]?.familia // <-- ESTA ES LA LÍNEA CLAVE QUE FALTABA
         };
+
+        console.log("DEBUG: Enviando este payload al backend:", JSON.stringify(payload, null, 2));
+
 
         try {
             const response = await fetch('http://localhost:5002/api/pedidos-nacionales', {
@@ -135,18 +129,18 @@ function FormularioPedidoNacional() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detalle || 'Error al guardar el pedido');
-            }
             const data = await response.json();
+            if (!response.ok) throw new Error(data.detalle || 'Error al guardar el pedido');
+            
             setSuccess(data.mensaje);
-            // Resetear formulario
-            setPedido({ familia_pedido: 'GOMA', numero_factura: '', proveedor: '', fecha_pedido: new Date().toISOString().split('T')[0], observaciones: '' });
-            setLineas([{ id: Date.now(), referencia_bobina: '', tipo_espesor: '', ancho: '', largo: '', precio_unitario_original: '', numero_bobinas: 1 }]);
+            setPedido({ numero_factura: '', proveedor: '', fecha_pedido: new Date().toISOString().split('T')[0], observaciones: '' });
+            setLineas([{ id: Date.now(), familia: familias[0]?.nombre || '', espesor: '', ancho: '', largo: '', precio_unitario: '', numero_bobinas: 1, referencia_bobina: '' }]);
             setGastos([]);
+            setFacturaError('');
         } catch (err) {
             setError(err.message);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -160,22 +154,15 @@ function FormularioPedidoNacional() {
                 <fieldset>
                     <legend>Datos del Pedido</legend>
                     <div className="form-grid">
-                        <label>Familia del Pedido:
-                            <select name="familia_pedido" value={pedido.familia_pedido} onChange={handlePedidoChange}>
-                                {Object.keys(tiposEspesorPorFamilia).map(familia => (
-                                    <option key={familia} value={familia}>{familia}</option>
-                                ))}
-                            </select>
-                        </label>
-                        <label>Nº Factura*:
-                            <input type="text" name="numero_factura" value={pedido.numero_factura} onChange={handlePedidoChange} onBlur={handleFacturaBlur} required />
-                            {facturaError && <span style={{ color: 'red', fontSize: '0.8em', display: 'block' }}>{facturaError}</span>}
-                        </label>
                         <label>Proveedor*:
                             <input type="text" name="proveedor" value={pedido.proveedor} onChange={handlePedidoChange} required list="proveedores-list" />
                             <datalist id="proveedores-list">
                                 {proveedores.map(p => <option key={p} value={p} />)}
                             </datalist>
+                        </label>
+                        <label>Nº Factura*:
+                            <input type="text" name="numero_factura" value={pedido.numero_factura} onChange={handlePedidoChange} onBlur={handleFacturaBlur} required />
+                            {facturaError && <span style={{ color: 'red', fontSize: '0.8em', display: 'block' }}>{facturaError}</span>}
                         </label>
                         <label>Fecha Pedido*:
                             <input type="date" name="fecha_pedido" value={pedido.fecha_pedido} onChange={handlePedidoChange} required />
@@ -187,20 +174,21 @@ function FormularioPedidoNacional() {
                 {lineas.map((linea, index) => (
                     <fieldset key={linea.id} className="linea-item">
                         <legend>Bobina {index + 1}</legend>
-                        <div className="form-grid-lineas" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
-                            <label>Referencia Bobina*: <input type="text" name="referencia_bobina" value={linea.referencia_bobina} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
-                            <label>Tipo/Espesor*:
-                                <select name="tipo_espesor" value={linea.tipo_espesor} onChange={(e) => handleLineaChange(linea.id, e)} required>
-                                    <option value="">-- Selecciona --</option>
-                                    {(tiposEspesorPorFamilia[pedido.familia_pedido] || []).map(subtipo => <option key={subtipo} value={subtipo}>{subtipo}</option>)}
+                        <div className="form-grid-lineas">
+                            <label>Familia*:
+                                <select name="familia" value={linea.familia} onChange={e => handleLineaChange(linea.id, e)} required>
+                                    <option value="" disabled>Selecciona...</option>
+                                    {familias.map(f => <option key={f.id} value={f.nombre}>{f.nombre}</option>)}
                                 </select>
                             </label>
-                            <label>Ancho (mm)*: <input type="number" name="ancho" value={linea.ancho} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
-                            <label>Largo (m)*: <input type="number" step="0.01" name="largo" value={linea.largo} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
-                            <label>Precio Metro Lineal Euros*: <input type="number" step="0.0001" name="precio_unitario_original" value={linea.precio_unitario_original} onChange={(e) => handleLineaChange(linea.id, e)} required /></label>
-                            <label>Nº Bobinas*: <input type="number" name="numero_bobinas" value={linea.numero_bobinas} onChange={(e) => handleLineaChange(linea.id, e)} required min="1" step="1" /></label>
+                            <label>Espesor*: <input type="text" name="espesor" value={linea.espesor} onChange={e => handleLineaChange(linea.id, e)} placeholder="Ej: 6mm" required /></label>
+                            <label>Ancho (mm)*: <input type="number" name="ancho" value={linea.ancho} onChange={e => handleLineaChange(linea.id, e)} required /></label>
+                            <label>Largo (m)*: <input type="number" step="0.01" name="largo" value={linea.largo} onChange={e => handleLineaChange(linea.id, e)} required /></label>
+                            <label>Precio Metro Lineal (€)*: <input type="number" step="0.0001" name="precio_unitario" value={linea.precio_unitario} onChange={e => handleLineaChange(linea.id, e)} required /></label>
+                            <label>Nº Bobinas*: <input type="number" name="numero_bobinas" value={linea.numero_bobinas} onChange={e => handleLineaChange(linea.id, e)} required min="1" step="1" /></label>
+                            <label>Referencia Bobina*: <input type="text" name="referencia_bobina" value={linea.referencia_bobina} onChange={e => handleLineaChange(linea.id, e)} required /></label>
                         </div>
-                        <button type="button" onClick={() => removeLinea(linea.id)} className="remove-btn">Eliminar Bobina</button>
+                        <button type="button" onClick={() => removeLinea(linea.id)} className="remove-btn">Eliminar</button>
                     </fieldset>
                 ))}
                 <button type="button" onClick={addLinea} className="add-btn">Añadir Bobina</button>
@@ -218,8 +206,8 @@ function FormularioPedidoNacional() {
                 ))}
                 <button type="button" onClick={addGasto} className="add-btn">Añadir Gasto</button>
 
-                <button type="submit" className="submit-btn">
-                    Guardar Pedido Nacional
+                <button type="submit" disabled={loading} className="submit-btn">
+                    {loading ? 'Guardando...' : 'Guardar Pedido Nacional'}
                 </button>
             </form>
         </div>

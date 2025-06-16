@@ -1,131 +1,75 @@
 // backend-node/seed_database.js
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
-const dbPath = path.resolve(__dirname, 'almacen', 'almacen.db');
+const almacenDir = path.resolve(__dirname, 'almacen');
+const dbPath = path.resolve(almacenDir, 'almacen.db');
 
-// --- Funciones de Ayuda ---
-function conectarDB() {
-    const db = new sqlite3.Database(dbPath, (err) => {
-        if (err) { console.error("Error al conectar a la base de datos:", err.message); throw err; }
-    });
-    db.exec('PRAGMA foreign_keys = ON;');
-    return db;
+// Borramos la base de datos anterior para asegurar una creación limpia
+if (fs.existsSync(dbPath)) {
+    fs.unlinkSync(dbPath);
+    console.log("Base de datos anterior eliminada.");
 }
 
-function runAsync(db, sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) { console.error('Error SQL:', sql, params, err.message); reject(err); }
-            else { resolve({ lastID: this.lastID, changes: this.changes }); }
+const db = new sqlite3.Database(dbPath);
+
+db.serialize(() => {
+    console.log("Creando la nueva estructura de base de datos...");
+    // Copiamos la misma lógica de creación de tablas de server.js para ser autocontenido
+    db.exec(`
+        PRAGMA foreign_keys = ON;
+
+        CREATE TABLE Familias ( id INTEGER PRIMARY KEY, nombre TEXT UNIQUE NOT NULL );
+        CREATE TABLE Atributos ( id INTEGER PRIMARY KEY, nombre TEXT UNIQUE NOT NULL );
+        CREATE TABLE ValoresAtributos ( id INTEGER PRIMARY KEY, atributo_id INTEGER NOT NULL, valor TEXT NOT NULL, FOREIGN KEY(atributo_id) REFERENCES Atributos(id), UNIQUE(atributo_id, valor) );
+        CREATE TABLE Items ( id INTEGER PRIMARY KEY, sku TEXT UNIQUE, descripcion TEXT, familia_id INTEGER, tipo_item TEXT NOT NULL, FOREIGN KEY(familia_id) REFERENCES Familias(id) );
+        CREATE TABLE ItemAtributos ( item_id INTEGER NOT NULL, valor_atributo_id INTEGER NOT NULL, PRIMARY KEY (item_id, valor_atributo_id), FOREIGN KEY(item_id) REFERENCES Items(id), FOREIGN KEY(valor_atributo_id) REFERENCES ValoresAtributos(id) );
+        CREATE TABLE Maquinaria ( id INTEGER PRIMARY KEY, nombre TEXT UNIQUE NOT NULL );
+        CREATE TABLE OrdenesProduccion ( id INTEGER PRIMARY KEY, item_id INTEGER, FOREIGN KEY(item_id) REFERENCES Items(id) );
+        CREATE TABLE PedidosProveedores ( id INTEGER PRIMARY KEY, numero_factura TEXT NOT NULL UNIQUE, proveedor TEXT, fecha_pedido TEXT, origen_tipo TEXT NOT NULL, valor_conversion REAL, status TEXT NOT NULL DEFAULT 'COMPLETADO', observaciones TEXT );
+        CREATE TABLE LineasPedido ( id INTEGER PRIMARY KEY, pedido_id INTEGER NOT NULL, item_id INTEGER NOT NULL, cantidad_bobinas INTEGER NOT NULL, metros_por_bobina REAL NOT NULL, precio_unitario REAL NOT NULL, moneda TEXT NOT NULL, FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id), FOREIGN KEY(item_id) REFERENCES Items(id) );
+        CREATE TABLE GastosPedido ( id INTEGER PRIMARY KEY, pedido_id INTEGER NOT NULL, descripcion TEXT NOT NULL, coste_eur REAL NOT NULL, tipo_gasto TEXT NOT NULL, FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) );
+        CREATE TABLE Stock ( id INTEGER PRIMARY KEY, lote TEXT UNIQUE NOT NULL, item_id INTEGER NOT NULL, cantidad_inicial REAL NOT NULL, cantidad_actual REAL NOT NULL, coste_lote REAL NOT NULL, pedido_id INTEGER, orden_produccion_id INTEGER, fecha_entrada TEXT NOT NULL, FOREIGN KEY(item_id) REFERENCES Items(id), FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id), FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id) );
+        CREATE TABLE Tarifas ( item_id INTEGER PRIMARY KEY, precio_venta REAL NOT NULL, ultimo_coste_compra REAL NOT NULL, fecha_actualizacion TEXT NOT NULL, FOREIGN KEY(item_id) REFERENCES Items(id) );
+    `, (err) => {
+        if (err) return console.error("Error creando tablas base:", err.message);
+        console.log("Estructura de 14 tablas creada con éxito.");
+        
+        // --- Helpers para la base de datos ---
+        const run = (sql, params = []) => new Promise((resolve, reject) => {
+            db.run(sql, params, function (err) { if (err) reject(err); else resolve({ lastID: this.lastID }); });
         });
-    });
-}
+        const get = (sql, params = []) => new Promise((resolve, reject) => {
+            db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); });
+        });
 
-async function crearTablasSiNoExisten(db) {
-    console.log("Verificando/Creando tablas en orden secuencial...");
-    // Tablas sin dependencias
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS Items (id INTEGER PRIMARY KEY, sku TEXT UNIQUE, descripcion TEXT, tipo_item TEXT, familia TEXT, espesor TEXT, ancho REAL, unidad_medida TEXT, coste_estandar REAL, status TEXT DEFAULT 'ACTIVO')`);    await runAsync(db, `CREATE TABLE IF NOT EXISTS PedidosProveedores (id INTEGER PRIMARY KEY, numero_factura TEXT UNIQUE, proveedor TEXT, fecha_pedido TEXT, fecha_llegada TEXT, origen_tipo TEXT, observaciones TEXT, valor_conversion REAL)`);
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS Maquinaria (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, descripcion TEXT, coste_hora_operacion REAL)`);
-
-    // Tablas con dependencias de primer nivel
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS OrdenesProduccion (id INTEGER PRIMARY KEY, item_id INTEGER, cantidad_a_producir REAL, fecha TEXT, status TEXT, coste_real_fabricacion REAL, observaciones TEXT, FOREIGN KEY(item_id) REFERENCES Items(id))`);
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS GastosPedido (id INTEGER PRIMARY KEY, pedido_id INTEGER, tipo_gasto TEXT, descripcion TEXT, coste_eur REAL, FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE)`);
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS LineasPedido (id INTEGER PRIMARY KEY, pedido_id INTEGER, item_id INTEGER, cantidad_original REAL, precio_unitario_original REAL, moneda_original TEXT, FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id) ON DELETE CASCADE, FOREIGN KEY(item_id) REFERENCES Items(id))`);
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS ProcesosFabricacion (id INTEGER PRIMARY KEY, producto_id INTEGER, maquinaria_id INTEGER, nombre_proceso TEXT, tiempo_estimado_segundos INTEGER, aplica_a_clientes TEXT, FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE, FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id))`);
-    
-    // Tablas con dependencias de segundo nivel
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS Recetas (id INTEGER PRIMARY KEY, producto_id INTEGER, material_id INTEGER, cantidad_requerida REAL, FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE, FOREIGN KEY(material_id) REFERENCES Items(id))`);
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS Stock (id INTEGER PRIMARY KEY, item_id INTEGER, lote TEXT UNIQUE, cantidad_inicial REAL, cantidad_actual REAL, coste_lote REAL, ubicacion TEXT, pedido_id INTEGER, orden_produccion_id INTEGER, fecha_entrada TEXT, status TEXT, FOREIGN KEY(item_id) REFERENCES Items(id), FOREIGN KEY(pedido_id) REFERENCES PedidosProveedores(id), FOREIGN KEY(orden_produccion_id) REFERENCES OrdenesProduccion(id))`);
-    
-    await runAsync(db, `CREATE TABLE IF NOT EXISTS ProcesosFabricacion (id INTEGER PRIMARY KEY, producto_id INTEGER, maquinaria_id INTEGER, nombre_proceso TEXT, tiempo_estimado_segundos INTEGER, aplica_a_clientes TEXT, FOREIGN KEY(producto_id) REFERENCES Items(id) ON DELETE CASCADE, FOREIGN KEY(maquinaria_id) REFERENCES Maquinaria(id))`);
-    console.log("Creación de tablas completada.");
-}
-
-
-// --- Lógica Principal del Seeder ---
-async function seedDatabase() {
-    const db = conectarDB();
-    console.log("Iniciando seeder con datos de prueba completos...");
-
-    try {
-        
-        await crearTablasSiNoExisten(db);
-
-        await runAsync(db, 'BEGIN TRANSACTION;');
-
-
-        // 1. LIMPIAR TABLAS
-        console.log("Limpiando datos existentes...");
-        const tablesToDelete = ['Stock', 'Recetas', 'GastosPedido', 'LineasPedido', 'Items', 'PedidosProveedores'];
-        for (const table of tablesToDelete) {
-            // Usamos un try/catch por si alguna tabla no existe, para que no detenga el script
+        // --- Lógica principal del Seeder ---
+        const seed = async () => {
             try {
-                await runAsync(db, `DELETE FROM ${table};`);
-                await runAsync(db, `DELETE FROM sqlite_sequence WHERE name='${table}';`);
-            } catch (e) {
-                // Ignoramos el error si la tabla no existe
-                if (!e.message.includes("no such table")) {
-                    throw e; // Lanzamos otros errores
-                }
+                await run('BEGIN TRANSACTION');
+                console.log("Poblando catálogos...");
+                await run(`INSERT INTO Familias (nombre) VALUES ('GOMA'), ('PVC'), ('FIELTRO')`);
+                await run(`INSERT INTO Atributos (nombre) VALUES ('Espesor'), ('Ancho'), ('Color')`);
+                const { id: espesorId } = await get(`SELECT id FROM Atributos WHERE nombre = 'Espesor'`);
+                const { id: anchoId } = await get(`SELECT id FROM Atributos WHERE nombre = 'Ancho'`);
+                await run(`INSERT INTO ValoresAtributos (atributo_id, valor) VALUES (?, '6mm'), (?, '8mm'), (?, '1000mm'), (?, '1200mm')`, [espesorId, espesorId, anchoId, anchoId]);
+
+                console.log("Creando artículos maestros de ejemplo...");
+                const { lastID: itemGomaId } = await run(`INSERT INTO Items (sku, descripcion, familia_id, tipo_item) VALUES (?, ?, ?, ?)`, ['GOM-6-1000', 'Goma EPDM 6mm 1000mm', 1, 'MATERIA_PRIMA']);
+                const { id: valEspesor6 } = await get(`SELECT id FROM ValoresAtributos WHERE valor = '6mm'`);
+                const { id: valAncho1000 } = await get(`SELECT id FROM ValoresAtributos WHERE valor = '1000mm'`);
+                await run(`INSERT INTO ItemAtributos (item_id, valor_atributo_id) VALUES (?, ?), (?, ?)`, [itemGomaId, valEspesor6, itemGomaId, valAncho1000]);
+
+                console.log("¡Base de datos poblada con éxito!");
+                await run('COMMIT');
+            } catch (error) {
+                await run('ROLLBACK');
+                console.error("Error poblando la base de datos, se revirtieron los cambios.", error);
+            } finally {
+                db.close(() => console.log("Conexión a la base de datos cerrada."));
             }
-        }
-
-        // 2. POBLAR ITEMS (Catálogo de todos los artículos)
-        console.log("Poblando catálogo de Items...");
-        const items = [
-            { sku: 'GOM-EPDM-6-1000', desc: 'Goma EPDM 6mm Ancho 1000mm', tipo: 'MATERIA_PRIMA', fam: 'GOMA', um: 'm' },
-            { sku: 'GOM-EPDM-8-1200', desc: 'Goma EPDM 8mm Ancho 1200mm', tipo: 'MATERIA_PRIMA', fam: 'GOMA', um: 'm' },
-            { sku: 'PVC-AZUL-3-1200', desc: 'PVC Azul 3mm Ancho 1200mm', tipo: 'MATERIA_PRIMA', fam: 'PVC', um: 'm' },
-            { sku: 'FIE-ADH-F10-1800', desc: 'Fieltro Adhesivo F10 Ancho 1800mm', tipo: 'MATERIA_PRIMA', fam: 'FIELTRO', um: 'm' },
-            { sku: 'VERDE-LONA-5-1500', desc: 'Lona Verde 5mm Ancho 1500mm', tipo: 'MATERIA_PRIMA', fam: 'VERDE', um: 'm' },
-            { sku: 'CARAM-PVC-2-1200', desc: 'PVC Caramelo 2mm Ancho 1200mm', tipo: 'MATERIA_PRIMA', fam: 'CARAMELO', um: 'm' },
-            { sku: 'PT-FALD-GOMA-STD', desc: 'Faldeta Estándar de Goma 6mm', tipo: 'PRODUCTO_TERMINADO', fam: 'FALDETA', um: 'unidad' }
-        ];
-        const itemIds = {};
-        for (const item of items) {
-            const res = await runAsync(db, `INSERT INTO Items (sku, descripcion, tipo_item, familia, unidad_medida) VALUES (?, ?, ?, ?, ?)`,
-                [item.sku, item.desc, item.tipo, item.fam, item.um]);
-            itemIds[item.sku] = res.lastID;
-        }
-
-        // 3. CREAR PEDIDOS CON GASTOS Y STOCK
-        console.log("Creando pedidos, gastos y lotes de stock...");
-        const today = new Date().toISOString().split('T')[0];
-
-        // Pedido GOMA
-        const pedGoma = await runAsync(db, `INSERT INTO PedidosProveedores (numero_factura, proveedor, origen_tipo, fecha_llegada) VALUES (?, ?, ?, ?)`, ['PED-GOMA-01', 'Gomasur', 'NACIONAL', today]);
-        await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`, [pedGoma.lastID, 'NACIONAL', 'Transporte Goma', 75.00]);
-        await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_original, precio_unitario_original) VALUES (?, ?, ?, ?)`, [pedGoma.lastID, itemIds['GOM-EPDM-6-1000'], 200, 12.50]);
-        await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`, [itemIds['GOM-EPDM-6-1000'], 'LOTE-GOM-01', 200, 200, 13.00, pedGoma.lastID, today]);
-
-        // Pedido PVC
-        const pedPvc = await runAsync(db, `INSERT INTO PedidosProveedores (numero_factura, proveedor, origen_tipo, fecha_llegada) VALUES (?, ?, ?, ?)`, ['PED-PVC-01', 'Plásticos Levante', 'NACIONAL', today]);
-        await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`, [pedPvc.lastID, 'NACIONAL', 'Envío Urgente', 45.00]);
-        await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_original, precio_unitario_original) VALUES (?, ?, ?, ?)`, [pedPvc.lastID, itemIds['PVC-AZUL-3-1200'], 150, 9.75]);
-        await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`, [itemIds['PVC-AZUL-3-1200'], 'LOTE-PVC-01', 150, 150, 10.14, pedPvc.lastID, today]);
-        
-        // Pedido FIELTRO
-        const pedFieltro = await runAsync(db, `INSERT INTO PedidosProveedores (numero_factura, proveedor, origen_tipo, fecha_llegada) VALUES (?, ?, ?, ?)`, ['PED-FIELTRO-01', 'Fieltros del Norte', 'NACIONAL', today]);
-        await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`, [pedFieltro.lastID, 'NACIONAL', 'Portes', 90.00]);
-        await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_original, precio_unitario_original) VALUES (?, ?, ?, ?)`, [pedFieltro.lastID, itemIds['FIE-ADH-F10-1800'], 100, 19.80]);
-        await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`, [itemIds['FIE-ADH-F10-1800'], 'LOTE-FIELTRO-01', 100, 100, 20.70, pedFieltro.lastID, today]);
-
-        // Contenedor CARAMELO
-        const pedCaramelo = await runAsync(db, `INSERT INTO PedidosProveedores (numero_factura, proveedor, origen_tipo, valor_conversion, fecha_llegada) VALUES (?, ?, ?, ?, ?)`, ['CONT-CARAM-01', 'Caramel Corp', 'CONTENEDOR', 1.08, today]);
-        await runAsync(db, `INSERT INTO GastosPedido (pedido_id, tipo_gasto, descripcion, coste_eur) VALUES (?, ?, ?, ?)`, [pedCaramelo.lastID, 'SUPLIDOS', 'Flete y Aranceles', 1650.00]);
-        await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_original, precio_unitario_original, moneda_original) VALUES (?, ?, ?, ?, ?)`, [pedCaramelo.lastID, itemIds['CARAM-PVC-2-1200'], 500, 8.75, 'USD']);
-        await runAsync(db, `INSERT INTO Stock (item_id, lote, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`, [itemIds['CARAM-PVC-2-1200'], 'LOTE-CARAM-01', 500, 500, 12.75, pedCaramelo.lastID, today]);
-        
-        await runAsync(db, 'COMMIT;');
-        console.log("\n¡Base de datos poblada con éxito!");
-
-    } catch (error) {
-        console.error("Error poblando la base de datos, revirtiendo cambios.", error);
-        await runAsync(db, 'ROLLBACK;');
-    } finally {
-        if (db) db.close(() => console.log("Conexión a la base de datos cerrada."));
-    }
-}
-
-seedDatabase();
+        };
+        seed();
+    });
+});
