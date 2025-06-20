@@ -170,7 +170,13 @@ function FormularioPedidoImportacion() {
                     <fieldset key={gasto.id} className="gasto-item">
                         <legend>Gasto {index + 1}</legend>
                         <div className="form-grid-gastos">
-                            <label>Tipo de Gasto: <select name="tipo_gasto" value={gasto.tipo_gasto} onChange={e => handleGastoChange(gasto.id, e)}><option value="SUPLIDOS">Suplidos</option><option value="EXENTO">Exento</option><option value="SUJETO">Sujeto a IVA</option></select></label>
+                            <label>Tipo de Gasto: 
+                                <select name="tipo_gasto" value={gasto.tipo_gasto} onChange={e => handleGastoChange(gasto.id, e)}>
+                                    <option value="SUPLIDOS">Suplidos</option>
+                                    <option value="EXENTO">Exento</option>
+                                    <option value="SUJETO">Sujeto a IVA</option>
+                                </select>
+                            </label>                            
                             <label>Descripción*: <input type="text" name="descripcion" value={gasto.descripcion} onChange={(e) => handleGastoChange(gasto.id, e)} required /></label>
                             <label>Coste (€)*: <input type="number" step="0.01" name="coste_eur" value={gasto.coste_eur} onChange={(e) => handleGastoChange(gasto.id, e)} required /></label>
                         </div>

@@ -3,25 +3,31 @@ import React, { useState, useEffect, useCallback } from 'react';
 import '../App.css'; // Reutilizamos estilos
 
 function GestionProductosRecetas() {
-    const [productos, setProductos] = useState([]);
+    const [plantillas, setPlantillas] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    
-    // --- Estado para el nuevo producto ---
-    const [sku, setSku] = useState('');
-    const [descripcion, setDescripcion] = useState('');
-    const [familiaId, setFamiliaId] = useState('');
-    const [atributos, setAtributos] = useState([{ nombre: '', valor: '' }]);
-    
-    // --- Estado para los catálogos ---
-    const [familias, setFamilias] = useState([]);
+    const [success, setSuccess] = useState('');
 
-    const fetchProductos = useCallback(async () => {
+    // Estado para el formulario de nueva plantilla
+    const [nuevaPlantilla, setNuevaPlantilla] = useState({
+        nombre: '',
+        familia: '',
+        espesor: '',
+        ancho_final: '',
+        largo_final: '',
+        unidad_medida: 'unidad',
+    });
+
+    // Estado para los desplegables dinámicos
+    const [materialesDisponibles, setMaterialesDisponibles] = useState({});
+
+    // --- Carga de datos ---
+    const fetchPlantillas = useCallback(async () => {
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:5002/api/productos-terminados');
-            if (!response.ok) throw new Error('No se pudieron cargar los artículos.');
-            setProductos(await response.json());
+            const response = await fetch('http://localhost:5002/api/items?tipo_item=PRODUCTO_TERMINADO');
+            if (!response.ok) throw new Error('No se pudieron cargar las plantillas.');
+            setPlantillas(await response.json());
         } catch (err) {
             setError(err.message);
         } finally {
@@ -29,93 +35,113 @@ function GestionProductosRecetas() {
         }
     }, []);
 
+    const fetchMateriales = useCallback(async () => {
+        try {
+            const response = await fetch('http://localhost:5002/api/materiales-disponibles');
+            if (!response.ok) throw new Error('No se pudieron cargar los materiales.');
+            const data = await response.json();
+            setMaterialesDisponibles(data);
+            // Si hay materiales, seleccionamos el primero por defecto
+            if (Object.keys(data).length > 0) {
+                const primeraFamilia = Object.keys(data)[0];
+                setNuevaPlantilla(prev => ({
+                    ...prev,
+                    familia: primeraFamilia,
+                    espesor: data[primeraFamilia][0] || ''
+                }));
+            }
+        } catch (err) {
+            setError(err.message);
+        }
+    }, []);
+
     useEffect(() => {
-        const fetchCatalogos = async () => {
-            const famRes = await fetch('http://localhost:5002/api/familias');
-            const famData = await famRes.json();
-            setFamilias(famData);
-            if (famData.length > 0) setFamiliaId(famData[0].id);
-        };
-        fetchCatalogos();
-        fetchProductos();
-    }, [fetchProductos]);
+        fetchPlantillas();
+        fetchMateriales();
+    }, [fetchPlantillas, fetchMateriales]);
 
-    const handleAtributoChange = (index, event) => {
-        const values = [...atributos];
-        values[index][event.target.name] = event.target.value;
-        setAtributos(values);
-    };
+    // --- Manejadores de eventos ---
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setNuevaPlantilla(prev => ({ ...prev, [name]: value }));
 
-    const addAtributo = () => setAtributos([...atributos, { nombre: '', valor: '' }]);
-    const removeAtributo = (index) => {
-        const values = [...atributos];
-        values.splice(index, 1);
-        setAtributos(values);
+        // Si cambiamos la familia, reseteamos el espesor al primero de la lista
+        if (name === 'familia') {
+            setNuevaPlantilla(prev => ({
+                ...prev,
+                espesor: materialesDisponibles[value][0] || ''
+            }));
+        }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const familiaSeleccionada = familias.find(f => f.id === parseInt(familiaId));
-        const payload = {
-            sku,
-            descripcion,
-            familia: familiaSeleccionada.nombre,
-            atributos: atributos.filter(a => a.nombre && a.valor) // Solo enviar atributos con nombre y valor
-        };
+        setError(null);
+        setSuccess('');
 
         try {
             const response = await fetch('http://localhost:5002/api/productos-terminados', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(nuevaPlantilla)
             });
+
+            const data = await response.json();
             if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.detalle || 'Error al crear el artículo');
+                throw new Error(data.detalle || 'Error al crear la plantilla');
             }
-            fetchProductos(); // Recargar la lista
+
+            setSuccess(data.mensaje);
+            fetchPlantillas(); // Recargar la lista de plantillas
             // Resetear formulario
-            setSku('');
-            setDescripcion('');
-            setAtributos([{ nombre: '', valor: '' }]);
+            setNuevaPlantilla({
+                nombre: '',
+                familia: Object.keys(materialesDisponibles)[0] || '',
+                espesor: materialesDisponibles[Object.keys(materialesDisponibles)[0]][0] || '',
+                ancho_final: '',
+                largo_final: '',
+                unidad_medida: 'unidad',
+            });
         } catch (err) {
             setError(err.message);
         }
     };
-    
-    // ... (Añadir función para eliminar producto)
+
+    const espesoresParaFamilia = nuevaPlantilla.familia ? materialesDisponibles[nuevaPlantilla.familia] || [] : [];
 
     return (
         <div className="gestion-articulos-container">
-            <h1>Gestión de Artículos</h1>
+            <h1>Gestión de Plantillas de Producto</h1>
             {error && <p className="error-message">{error}</p>}
-            
+            {success && <p className="success-message">{success}</p>}
+
             <form onSubmit={handleSubmit} className="form-section">
-                <h2>Crear Nuevo Artículo</h2>
+                <h2>Crear Nueva Plantilla</h2>
                 <div className="form-grid">
-                    <label>SKU (Opcional): <input type="text" value={sku} onChange={e => setSku(e.target.value)} /></label>
-                    <label>Descripción*: <input type="text" value={descripcion} onChange={e => setDescripcion(e.target.value)} required /></label>
-                    <label>Familia*: 
-                        <select value={familiaId} onChange={e => setFamiliaId(e.target.value)} required>
-                            {familias.map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                    <label>Nombre de la Plantilla*: <input type="text" name="nombre" value={nuevaPlantilla.nombre} onChange={handleChange} required /></label>
+
+                    <label>Material Principal (Familia)*: 
+                        <select name="familia" value={nuevaPlantilla.familia} onChange={handleChange} required>
+                            {Object.keys(materialesDisponibles).map(f => <option key={f} value={f}>{f}</option>)}
                         </select>
                     </label>
-                </div>
 
-                <h4>Atributos</h4>
-                {atributos.map((attr, index) => (
-                    <div key={index} className="form-grid-lineas">
-                        <input type="text" name="nombre" placeholder="Nombre Atributo (ej. Espesor)" value={attr.nombre} onChange={e => handleAtributoChange(index, e)} />
-                        <input type="text" name="valor" placeholder="Valor (ej. 6mm)" value={attr.valor} onChange={e => handleAtributoChange(index, e)} />
-                        <button type="button" onClick={() => removeAtributo(index)} className="remove-btn">Quitar</button>
-                    </div>
-                ))}
-                <button type="button" onClick={addAtributo} className="add-btn">Añadir Atributo</button>
-                <button type="submit" className="submit-btn" style={{marginTop: '20px'}}>Guardar Artículo</button>
+                    <label>Espesor Principal*: 
+                        <select name="espesor" value={nuevaPlantilla.espesor} onChange={handleChange} required>
+                            {espesoresParaFamilia.map(e => <option key={e} value={e}>{e}</option>)}
+                        </select>
+                    </label>
+
+                    <label>Ancho Final (mm): <input type="number" name="ancho_final" value={nuevaPlantilla.ancho_final} onChange={handleChange} /></label>
+                    <label>Largo Final (mm): <input type="number" name="largo_final" value={nuevaPlantilla.largo_final} onChange={handleChange} /></label>
+                    <label>Unidad de Medida*: <input type="text" name="unidad_medida" value={nuevaPlantilla.unidad_medida} onChange={handleChange} required /></label>
+                </div>
+                <button type="submit" className="submit-btn" style={{marginTop: '20px'}}>Guardar Plantilla</button>
             </form>
 
             <div className="list-section">
-                <h2>Listado de Artículos Fabricados</h2>
+                <h2>Listado de Plantillas Creadas</h2>
+                {loading && <p>Cargando...</p>}
                 <table>
                     <thead>
                         <tr>
@@ -127,7 +153,7 @@ function GestionProductosRecetas() {
                         </tr>
                     </thead>
                     <tbody>
-                        {productos.map(p => (
+                        {plantillas.map(p => (
                             <tr key={p.id}>
                                 <td>{p.sku}</td>
                                 <td>{p.descripcion}</td>

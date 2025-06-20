@@ -11,33 +11,6 @@ import GestionProduccion from './components/GestionProduccion.jsx';
 import FormularioConfiguracion from './components/FormularioConfiguracion.jsx';
 import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
 import FormularioEditarPedido from './components/FormularioEditarPedido.jsx';
-import FormularioOrdenProduccion from './components/FormularioOrdenProduccion.jsx';
-
-// El modal de detalles ya no se usará en esta vista, pero lo dejamos por si se necesita en otro lugar.
-function DetalleStockModal({ item, onClose }) {
-  if (!item) return null;
-   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h2>Detalles del Lote: {item.lote} (Ref: {item.sku})</h2>
-        <div className="modal-details-grid">
-            <p><strong>Referencia:</strong> {item.sku || 'N/A'}</p>
-            <p><strong>Descripción:</strong> {item.descripcion || 'N/A'}</p>
-            <p><strong>Familia:</strong> {item.familia || 'N/A'}</p>
-            <p><strong>Espesor:</strong> {item.espesor || 'N/A'}</p>
-            <p><strong>Ancho:</strong> {item.ancho ? `${item.ancho} mm` : 'N/A'}</p>
-            <p><strong>Lote:</strong> {item.lote || 'N/A'}</p>
-            <p><strong>Cantidad Actual:</strong> {parseFloat(item.cantidad_actual || 0).toFixed(2)} {item.unidad_medida}</p>
-            <p><strong>Coste del Lote:</strong> {parseFloat(item.coste_lote || 0).toFixed(4)} €/{item.unidad_medida}</p>
-            <p><strong>Ubicación:</strong> {item.ubicacion || 'N/A'}</p>
-            <p><strong>Estado:</strong> {item.status || 'N/A'}</p>
-        </div>
-        <button onClick={onClose} className="modal-close-button">Cerrar</button>
-      </div>
-    </div>
-  );
-}
-
 
 function App() {
   const [stockList, setStockList] = useState([]);
@@ -47,6 +20,24 @@ function App() {
   const [vistaActual, setVistaActual] = useState('STOCK');
   const [pedidoAEditarId, setPedidoAEditarId] = useState(null);
 
+  // --- NUEVO ESTADO PARA LAS FAMILIAS ---
+  const [familias, setFamilias] = useState([]);
+
+  // --- NUEVO USEEFFECT PARA CARGAR LAS FAMILIAS ---
+  useEffect(() => {
+    const fetchFamilias = async () => {
+      try {
+        const response = await fetch('http://localhost:5002/api/familias');
+        if (!response.ok) throw new Error('No se pudieron cargar las familias');
+        setFamilias(await response.json());
+      } catch (error) {
+        console.error(error);
+        // No establecemos un error principal aquí para no bloquear la app
+      }
+    };
+    fetchFamilias();
+  }, []); // Se ejecuta solo una vez al cargar la aplicación
+
   const fetchStockAndProcess = useCallback(async () => {
     setLoadingStock(true);
     setErrorStock(null);
@@ -54,8 +45,6 @@ function App() {
     if (filtroFamilia) params.append('familia', filtroFamilia);
     const queryString = params.toString();
     const apiUrl = `http://localhost:5002/api/stock/agrupado${queryString ? `?${queryString}` : ''}`;
-    
-    console.log("Llamando a la API de stock agrupado:", apiUrl);
 
     try {
       const response = await fetch(apiUrl);
@@ -77,16 +66,14 @@ function App() {
     }
   }, [vistaActual, fetchStockAndProcess]);
 
-  // LA FUNCIÓN renderVista SÓLO DEVUELVE EL CONTENIDO DE LA VISTA ACTUAL
   const renderVista = () => {
     if (pedidoAEditarId) {
         return <FormularioEditarPedido 
                     pedidoId={pedidoAEditarId} 
-                    onFinalizado={() => setPedidoAEditarId(null)} // Al finalizar, volvemos a la lista
-                    onCancel={() => setPedidoAEditarId(null)} // Al cancelar, también
+                    onFinalizado={() => { setPedidoAEditarId(null); setVistaActual('LISTA_PEDIDOS'); }}
+                    onCancel={() => setPedidoAEditarId(null)}
                 />;
     }
-
 
     switch (vistaActual) {
       case 'NACIONAL': return <FormularioPedidoNacional />;
@@ -95,12 +82,10 @@ function App() {
       case 'TARIFA_VENTA': return <TarifaVenta />;
       case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
       case 'IMPORTACION': return <FormularioPedidoImportacion />;
-      case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
       case 'MAQUINARIA': return <GestionMaquinaria />;
-      case 'PRODUCCION': return <GestionProduccion />; // Esta será la lista de órdenes
-      case 'NUEVA_ORDEN_PRODUCCION': return <FormularioOrdenProduccion />; // <-- NUEVO CASE
+      case 'PRODUCCION': return <GestionProduccion />;
       case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
-      // En App.jsx, dentro de la función renderVista, REEMPLAZA el bloque case 'STOCK'
+      case 'CONFIGURACION': return <FormularioConfiguracion />;
 
       case 'STOCK':
       default:
@@ -113,12 +98,12 @@ function App() {
               <div className="filtros-container">
                 <div className="filtro-item">
                   <label htmlFor="filtro-familia">Filtrar por Familia:</label>
+                  {/* --- SELECT DINÁMICO --- */}
                   <select id="filtro-familia" value={filtroFamilia} onChange={(e) => setFiltroFamilia(e.target.value)}>
                       <option value="">Todas</option>
-                      {/* Aquí podrías cargar las familias dinámicamente si lo deseas en el futuro */}
-                      <option value="GOMA">GOMA</option>
-                      <option value="FIELTRO">FIELTRO</option>
-                      <option value="PVC">PVC</option>
+                      {familias.map(familia => (
+                        <option key={familia.id} value={familia.nombre}>{familia.nombre}</option>
+                      ))}
                   </select>
                 </div>
               </div>
@@ -153,8 +138,7 @@ function App() {
         );
     }
   };
-  
-  // LA ESTRUCTURA PRINCIPAL DE LA APP VA AQUÍ, EN EL RETURN DEL COMPONENTE APP
+
   return (
     <div className="app-layout">
       <nav className="sidebar">
@@ -172,10 +156,7 @@ function App() {
             <h3>Fabricación</h3>
             <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
             <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
-            {/* Cambiamos el nombre de "Producción" a "Ver Órdenes" o similar */}
-            <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Ver Órdenes</button>
-            {/* NUEVO BOTÓN */}
-            <button onClick={() => setVistaActual('NUEVA_ORDEN_PRODUCCION')} disabled={vistaActual === 'NUEVA_ORDEN_PRODUCCION'}>Nueva Orden Producción</button>
+            <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Gestión de Producción</button>
         </div>
         <div className="sidebar-section">
             <h3>Herramientas</h3>

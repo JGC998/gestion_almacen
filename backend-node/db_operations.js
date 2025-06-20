@@ -289,28 +289,20 @@ async function findOrCreateItem(db, itemInfo) {
     return itemId;
 }
 
-
-
-async function procesarNuevoPedido(datosCompletosPedido) {
-    // La función sigue recibiendo todo el payload
-    const { pedido, lineas, gastos, status, material_tipo_general } = datosCompletosPedido;
+async function procesarNuevoPedido(datosCompletosPedido, configuraciones) { // <-- AÑADIDO 'configuraciones'
+    const { pedido, lineas, gastos, status } = datosCompletosPedido;
     const db = conectarDB();
-
-    // --- LÍNEA DE DEFENSA ---
-    // Aseguramos que el estado siempre sea un valor válido, sin importar lo que envíe el frontend.
     const estadoFinal = (status === 'BORRADOR') ? 'BORRADOR' : 'COMPLETADO';
 
     try {
         await runAsync(db, 'BEGIN TRANSACTION;');
 
-        // Usamos la variable segura 'estadoFinal' en el INSERT
         const pedidoResult = await runAsync(db,
             `INSERT INTO PedidosProveedores (numero_factura, proveedor, fecha_pedido, origen_tipo, valor_conversion, status, observaciones) VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [pedido.numero_factura, pedido.proveedor, pedido.fecha_pedido, pedido.origen_tipo, pedido.valor_conversion, estadoFinal, pedido.observaciones]
         );
         const pedidoId = pedidoResult.lastID;
-        
-        // El resto de la lógica para gastos, líneas y stock se mantiene igual...
+
         for (const gasto of gastos) {
             await runAsync(db, `INSERT INTO GastosPedido (pedido_id, descripcion, coste_eur, tipo_gasto) VALUES (?, ?, ?, ?)`, 
                 [pedidoId, gasto.descripcion, parseFloat(gasto.coste_eur) || 0, gasto.tipo_gasto]);
@@ -328,20 +320,21 @@ async function procesarNuevoPedido(datosCompletosPedido) {
 
             for (const linea of lineas) {
                 const itemId = await findOrCreateItem(db, linea.item);
-                await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_bobinas, metros_por_bobina, precio_unitario, moneda) VALUES (?, ?, ?, ?, ?, ?)`,
+                const lineaPedidoResult = await runAsync(db, `INSERT INTO LineasPedido (pedido_id, item_id, cantidad_bobinas, metros_por_bobina, precio_unitario, moneda) VALUES (?, ?, ?, ?, ?, ?)`,
                     [pedidoId, itemId, linea.cantidad_bobinas, linea.metros_por_bobina, linea.precio_unitario, linea.moneda]);
+                const lineaPedidoId = lineaPedidoResult.lastID;
                 
                 const costeUnitarioEnEuros = (pedido.origen_tipo === 'IMPORTACION' ? linea.precio_unitario * valorConversion : linea.precio_unitario);
                 const costeFinalConGastos = costeUnitarioEnEuros * (1 + porcentajeGastos);
                 
                 for (let i = 1; i <= linea.cantidad_bobinas; i++) {
-                    const proveedorLimpio = (pedido.proveedor || 'S-P').trim().toUpperCase().replace(/\s+/g, '-');
-                    const lote = `${proveedorLimpio}-${linea.referencia_bobina || `IT${itemId}`}-P${pedidoId}-${i}`;
+                    const lote = `P${pedidoId}-L${lineaPedidoId}-B${i}`;
 
                     await runAsync(db, `INSERT INTO Stock (lote, item_id, cantidad_inicial, cantidad_actual, coste_lote, pedido_id, fecha_entrada) VALUES (?, ?, ?, ?, ?, ?, ?)`,
                         [lote, itemId, linea.metros_por_bobina, linea.metros_por_bobina, costeFinalConGastos, pedidoId, pedido.fecha_pedido]);
                     
-                    await actualizarTarifaSiNecesario(db, itemId, costeFinalConGastos);
+                    // Aquí pasamos la configuración a la función que la necesita
+                    await actualizarTarifaSiNecesario(db, itemId, costeFinalConGastos, configuraciones);
                 }
             }
         }
@@ -356,6 +349,9 @@ async function procesarNuevoPedido(datosCompletosPedido) {
         db.close();
     }
 }
+
+
+
 
 async function generarStockParaPedido(db, pedidoId) {
     const pedido = await getAsync(db, `SELECT * FROM PedidosProveedores WHERE id = ?`, [pedidoId]);
@@ -388,12 +384,11 @@ async function generarStockParaPedido(db, pedidoId) {
     }
 }
 
+// En backend-node/db_operations.js
+// REEMPLAZA la función 'actualizarTarifaSiNecesario' por esta:
 
-// REEMPLAZA esta función en db_operations.js
-
-async function actualizarTarifaSiNecesario(db, itemId, nuevoCosteCompra) {
-    // Leemos los márgenes desde el archivo de configuración
-    const configuraciones = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
+async function actualizarTarifaSiNecesario(db, itemId, nuevoCosteCompra, configuraciones) {
+    // Ya no lee el archivo, usa el parámetro 'configuraciones'
     const tiposDeTarifa = [
         { key: 'FINAL', margen: configuraciones.margen_default_final },
         { key: 'FABRICANTE', margen: configuraciones.margen_default_fabricante },
@@ -403,12 +398,10 @@ async function actualizarTarifaSiNecesario(db, itemId, nuevoCosteCompra) {
 
     for (const tarifa of tiposDeTarifa) {
         const tarifaActual = await getAsync(db, `SELECT ultimo_coste_compra FROM Tarifas WHERE item_id = ? AND tipo_tarifa = ?`, [itemId, tarifa.key]);
-        
-        // Solo actualizamos si el nuevo coste es mayor, o si la tarifa no existe
+
         if (!tarifaActual || nuevoCosteCompra > tarifaActual.ultimo_coste_compra) {
-            const nuevoPrecioVenta = nuevoCosteCompra * (1 + tarifa.margen);
-            
-            // Usamos INSERT OR REPLACE (UPSERT) para insertar si no existe, o reemplazar si ya existe.
+            const nuevoPrecioVenta = nuevoCosteCompra * (1 + (tarifa.margen || 0));
+
             await runAsync(db, 
                 `INSERT OR REPLACE INTO Tarifas (item_id, tipo_tarifa, precio_venta, ultimo_coste_compra, fecha_actualizacion) 
                  VALUES (?, ?, ?, ?, ?)`,
@@ -418,7 +411,6 @@ async function actualizarTarifaSiNecesario(db, itemId, nuevoCosteCompra) {
         }
     }
 }
-
 
 
 
@@ -1647,16 +1639,7 @@ async function calcularCosteProcesos(dbInstance, productoTerminadoId, configurac
 async function obtenerUltimoCosteMaterialGenerico(dbInstance, materialGenerico) { /* ...usar getAsync(dbInstance, ...) ... */ }
 
 // --- LÓGICA DE PROCESAMIENTO DE ÓRDENES DE PRODUCCIÓN ---
-
-/**
- * Procesa una Orden de Producción, descontando materiales y añadiendo producto terminado.
- * Ahora busca y consume stock específico basado en la receta genérica.
- * @param {number} ordenProduccionId - ID de la orden de producción a procesar.
- * @param {object} configuraciones - Objeto con las configuraciones cargadas.
- * @returns {Promise<object>} Resumen de la operación.
- */
-// En db_operations.js
-// REEMPLAZA la función 'procesarOrdenProduccion' entera
+// En backend-node/db_operations.js, REEMPLAZA esta función
 async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, configuraciones) {
     const db = conectarDB();
     try {
@@ -1672,13 +1655,14 @@ async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, conf
 
         let costeTotalMaterialesReal = 0;
 
+        // Bucle sobre las asignaciones que vienen del frontend
         for (const assignment of stockAssignments) {
             const recetaItem = await getAsync(db, `SELECT * FROM Recetas WHERE id = ?`, [assignment.recetaId]);
             if (!recetaItem) throw new Error(`Item de receta con ID ${assignment.recetaId} no encontrado.`);
 
             const stockItem = await getAsync(db, `SELECT * FROM Stock WHERE id = ?`, [assignment.stockId]);
             if (!stockItem) throw new Error(`Lote de stock con ID ${assignment.stockId} no encontrado.`);
-            
+
             const cantidadNecesaria = (recetaItem.cantidad_requerida || 0) * (orden.cantidad_a_producir || 0);
 
             if (stockItem.cantidad_actual < cantidadNecesaria) {
@@ -1689,18 +1673,17 @@ async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, conf
             const nuevaCantidad = stockItem.cantidad_actual - cantidadNecesaria;
             const nuevoStatus = nuevaCantidad > 0 ? 'EMPEZADA' : 'AGOTADO';
             await runAsync(db, `UPDATE Stock SET cantidad_actual = ?, status = ? WHERE id = ?`, [nuevaCantidad, nuevoStatus, stockItem.id]);
-            
+
             // Acumular coste real
             costeTotalMaterialesReal += cantidadNecesaria * (stockItem.coste_lote || 0);
         }
 
-        // Calcular coste de procesos (esta lógica no cambia)
         const costeProcesos = await calcularCosteProcesos(db, orden.item_id, configuraciones);
         const costeTotalProcesos = costeProcesos * orden.cantidad_a_producir;
-        
+
         const costeFabricacionReal = costeTotalMaterialesReal + costeTotalProcesos;
         const costeUnitarioFinal = orden.cantidad_a_producir > 0 ? costeFabricacionReal / orden.cantidad_a_producir : 0;
-        
+
         // Añadir producto terminado al stock
         const lotePT = `PROD-OP${ordenProduccionId}`;
         await runAsync(db, `
@@ -1714,7 +1697,7 @@ async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, conf
 
         await runAsync(db, 'COMMIT;');
         return {
-            mensaje: `Orden ID ${ordenProduccionId} completada. ${orden.cantidad_a_producir} uds. de '${productoTerminado.descripcion}' añadidas al stock.`,
+            mensaje: `Orden ID ${ordenProduccionId} completada. <span class="math-inline">\{orden\.cantidad\_a\_producir\} uds\. de '</span>{productoTerminado.descripcion}' añadidas al stock.`,
             costeFabricacionReal,
         };
     } catch (error) {
@@ -1725,6 +1708,8 @@ async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, conf
         db.close();
     }
 }
+
+
 
 // --- NUEVA FUNCIÓN: Obtener materiales genéricos con su último coste ---
 async function obtenerMaterialesGenericos() {
@@ -2190,7 +2175,6 @@ module.exports = {
     
 
     crearItem,
-    procesarNuevoPedido,
     consultarTarifas,
 
         

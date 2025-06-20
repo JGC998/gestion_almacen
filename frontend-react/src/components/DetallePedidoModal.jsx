@@ -54,8 +54,8 @@ function DetallePedidoModal({ pedidoId, onClose }) {
                     <th>Características</th>
                     <th>Nº Bobinas</th>
                     <th>Largo (m)</th>
-                    <th>Precio Compra (€)</th>
-                    <th>Precio Final (€)</th>
+                    <th>Precio Compra (€/m)</th>
+                    <th>Precio Final (€/m)</th>
                   </tr>
                 </thead>
                 <tbody>

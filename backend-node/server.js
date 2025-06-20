@@ -396,6 +396,20 @@ app.get('/api/familias', async (req, res) => {
     }
 });
 
+// En backend-node/server.js, añade este nuevo endpoint
+
+app.get('/api/materiales-disponibles', async (req, res) => {
+    console.log('Node.js: GET /api/materiales-disponibles');
+    try {
+        // Reutilizamos la función que ya tenías para esto
+        const data = await consultarFamiliasYEspesores();
+        res.json(data);
+    } catch (error) {
+        console.error("Error en GET /api/materiales-disponibles:", error.message);
+        res.status(500).json({ error: "Error interno al obtener materiales disponibles.", detalle: error.message });
+    }
+});
+
 // AÑADE estos dos nuevos endpoints en server.js
 
 // Endpoint para autocompletar proveedores
@@ -469,32 +483,25 @@ function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
 
 
 
-
 app.post('/api/pedidos-nacionales', async (req, res) => {
-    // Se usa 'material_tipo_general' que es lo que envía el frontend
     const { pedido, lineas, gastos, material_tipo_general } = req.body;
 
     console.log(`Node.js: POST /api/pedidos-nacionales, Material: ${material_tipo_general}`);
 
     if (!pedido || !lineas || !gastos || !material_tipo_general) {
-        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos' y 'material_tipo_general'." });
+        return res.status(400).json({ error: "Datos incompletos." });
     }
     
-    // El resto de la lógica no necesita cambiar, pero hay que pasar el parámetro correcto.
-    const tiposFamiliaValidos = ['GOMA', 'PVC', 'FIELTRO', 'VERDE', 'CARAMELO', 'NEGRA'];
-    if (!tiposFamiliaValidos.includes(material_tipo_general.toUpperCase())) {
-        return res.status(400).json({ error: "Valor de 'material_tipo_general' no válido." });
-    }
-
     try {
         const datosParaDB = {
             pedido: { ...pedido, origen_tipo: 'NACIONAL' },
             lineas: lineas,
             gastos: gastos,
-            material_tipo_general: material_tipo_general // Se pasa el parámetro correcto
+            material_tipo_general: material_tipo_general
         };
 
-        const resultado = await procesarNuevoPedido(datosParaDB);
+        // El cambio clave es pasar 'appConfig' aquí
+        const resultado = await procesarNuevoPedido(datosParaDB, appConfig);
 
         console.log(`Node.js: Pedido NACIONAL de ${material_tipo_general} creado con ID: ${resultado.pedidoId}`);
         res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
@@ -508,36 +515,28 @@ app.post('/api/pedidos-nacionales', async (req, res) => {
     }
 });
 
+
+// REEMPLAZA EL ENDPOINT DE PEDIDOS DE IMPORTACIÓN
 app.post('/api/pedidos-importacion', async (req, res) => {
-    // Se desestructura 'material_tipo_general' y se obtiene 'valor_conversion' desde dentro del objeto 'pedido'
     const { pedido, lineas, gastos, material_tipo_general } = req.body;
     const valor_conversion = pedido.valor_conversion;
 
     console.log(`Node.js: POST /api/pedidos-importacion, Material: ${material_tipo_general}, Conv: ${valor_conversion}`);
 
     if (!pedido || !lineas || !gastos || !material_tipo_general || valor_conversion === undefined) {
-        return res.status(400).json({ error: "Datos incompletos. Se requiere 'pedido', 'lineas', 'gastos', 'material_tipo_general' y 'valor_conversion'." });
-    }
-
-    const vc = parseFloat(valor_conversion);
-    if (isNaN(vc) || vc <= 0) {
-        return res.status(400).json({ error: "El 'valor_conversion' debe ser un número positivo." });
-    }
-    
-    const tiposGastoImportacionValidos = ['SUPLIDOS', 'EXENTO', 'SUJETO'];
-    if (gastos.some(g => !tiposGastoImportacionValidos.includes(g.tipo_gasto?.toUpperCase()))) {
-        return res.status(400).json({ error: `Tipos de gasto para importación deben ser ${tiposGastoImportacionValidos.join(', ')}`});
+        return res.status(400).json({ error: "Datos incompletos." });
     }
 
     try {
         const datosParaDB = {
-            pedido: { ...pedido, origen_tipo: 'CONTENEDOR', valor_conversion: vc },
+            pedido: { ...pedido, origen_tipo: 'IMPORTACION', valor_conversion: parseFloat(valor_conversion) },
             lineas: lineas,
             gastos: gastos.map(g => ({...g, tipo_gasto: g.tipo_gasto.toUpperCase()})),
             material_tipo_general: material_tipo_general.toUpperCase()
         };
 
-        const resultado = await procesarNuevoPedido(datosParaDB);
+        // El cambio clave es pasar 'appConfig' aquí
+        const resultado = await procesarNuevoPedido(datosParaDB, appConfig);
 
         console.log(`Node.js: Pedido de IMPORTACIÓN de ${material_tipo_general} creado con ID: ${resultado.pedidoId}`);
         res.status(201).json({ mensaje: resultado.mensaje, pedidoId: resultado.pedidoId });
@@ -550,6 +549,7 @@ app.post('/api/pedidos-importacion', async (req, res) => {
         res.status(500).json({ error: "Error interno del servidor al crear el pedido de importación.", detalle: error.message });
     }
 });
+
 
 app.patch('/api/stock-items/:stockItemId/estado', async (req, res) => {
     const stockItemId = parseInt(req.params.stockItemId, 10);
@@ -677,32 +677,38 @@ app.get('/api/stock/agrupado', async (req, res) => {
 
 
 // En backend-node/server.js
-
-// VOY A REEMPLAZAR EL ENDPOINT 'POST /api/productos-terminados' POR ESTA VERSIÓN SIMPLIFICADA:
+// En backend-node/server.js, REEMPLAZA este endpoint
 app.post('/api/productos-terminados', async (req, res) => {
-    const productoData = req.body;
-    console.log('Node.js: POST /api/productos-terminados, datos recibidos:', productoData);
+    // El req.body ahora vendrá con la estructura correcta del nuevo formulario
+    const plantillaData = req.body;
+    console.log('Node.js: POST /api/productos-terminados, datos recibidos:', plantillaData);
 
-    if (!productoData.nombre || !productoData.material_principal || !productoData.espesor_principal) {
-        return res.status(400).json({ error: "Nombre, material principal y espesor son requeridos." });
+    // Validamos los datos clave
+    if (!plantillaData.nombre || !plantillaData.familia || !plantillaData.espesor) {
+        return res.status(400).json({ error: "Nombre, familia (material principal) y espesor son requeridos." });
     }
 
     try {
-        // La lógica de transacción ya no es necesaria aquí para este propósito
-        // La función 'insertarProductoTerminado' ahora maneja la creación completa del Item
-        const productoId = await insertarProductoTerminado(productoData);
+        // La función findOrCreateItem se encargará de todo
+        const itemId = await findOrCreateItem(db, {
+            sku: `<span class="math-inline">\{plantillaData\.familia\.substring\(0,3\)\}\-</span>{plantillaData.espesor}-${plantillaData.ancho_final || 'ANCHO'}`, // SKU simple
+            descripcion: plantillaData.nombre,
+            familia: plantillaData.familia,
+            tipo_item: 'PRODUCTO_TERMINADO',
+            atributos: [
+                { nombre: 'Espesor', valor: plantillaData.espesor },
+                { nombre: 'Ancho', valor: `${plantillaData.ancho_final}mm` },
+                { nombre: 'Largo', valor: `${plantillaData.largo_final}mm` }
+            ]
+        });
 
-        // Después de crear, recalculamos el coste estándar
-        await actualizarCosteFabricacionEstandar(productoId, appConfig);
+        // Opcional: podrías recalcular costes aquí si fuera necesario en el futuro
+        // await actualizarCosteFabricacionEstandar(itemId, appConfig);
 
-        // Obtenemos el producto recién creado para devolver su referencia (SKU)
-        const nuevoProducto = await consultarProductoTerminadoPorId(productoId);
-
-        console.log(`Plantilla de producto ID ${productoId} creada con referencia ${nuevoProducto.referencia}.`);
+        console.log(`Plantilla de producto ID ${itemId} creada con éxito.`);
         res.status(201).json({ 
             mensaje: "Plantilla de producto creada con éxito.", 
-            id: productoId, 
-            referencia: nuevoProducto.referencia 
+            id: itemId
         });
 
     } catch (error) {
@@ -1197,9 +1203,8 @@ app.delete('/api/ordenes-produccion/:id', async (req, res) => {
     }
 });
 
-// Endpoint para procesar una orden de producción (consumir stock, generar PT)
-// En server.js, busca el endpoint de procesar orden
-// REEMPLAZA el endpoint existente por este:
+
+// En backend-node/server.js, REEMPLAZA este endpoint
 app.post('/api/ordenes-produccion/:id/procesar', async (req, res) => {
     const ordenId = parseInt(req.params.id, 10);
     const { stockAssignments } = req.body; // Recibimos las asignaciones desde el frontend

@@ -8,22 +8,18 @@ function GestionProduccion() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
-  
-  // Estado para el formulario de nueva orden
+
   const [newOrden, setNewOrden] = useState({
     producto_terminado_id: '',
     cantidad_a_producir: '',
     fecha: new Date().toISOString().split('T')[0],
-    observaciones: ''
   });
 
-  // --- Estados para el detalle interactivo ---
   const [selectedOrden, setSelectedOrden] = useState(null);
   const [recetaDeOrden, setRecetaDeOrden] = useState([]);
   const [stockDisponible, setStockDisponible] = useState({});
   const [stockAsignado, setStockAsignado] = useState({});
 
-  // --- Fetchers de Datos ---
   const fetchProductosTerminados = useCallback(async () => {
     try {
       const response = await fetch('http://localhost:5002/api/items?tipo_item=PRODUCTO_TERMINADO');
@@ -52,7 +48,6 @@ function GestionProduccion() {
     fetchOrdenes();
   }, [fetchProductosTerminados, fetchOrdenes]);
 
-  // --- Handlers para el formulario de creación ---
   const handleNewOrdenChange = (e) => {
     const { name, value } = e.target;
     setNewOrden(prev => ({ ...prev, [name]: value }));
@@ -64,9 +59,9 @@ function GestionProduccion() {
     setSuccessMessage('');
     try {
         const payload = {
-            ...newOrden,
-            producto_terminado_id: parseInt(newOrden.producto_terminado_id),
-            cantidad_a_producir: parseFloat(newOrden.cantidad_a_producir)
+            item_id: parseInt(newOrden.producto_terminado_id),
+            cantidad_a_producir: parseFloat(newOrden.cantidad_a_producir),
+            fecha: newOrden.fecha
         };
         const response = await fetch('http://localhost:5002/api/ordenes-produccion', {
             method: 'POST',
@@ -75,19 +70,18 @@ function GestionProduccion() {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Error al crear la orden.');
-        
+
         setSuccessMessage(data.mensaje);
-        setNewOrden({ producto_terminado_id: '', cantidad_a_producir: '', fecha: new Date().toISOString().split('T')[0], observaciones: '' });
-        fetchOrdenes(); // Recargar lista
+        setNewOrden({ producto_terminado_id: '', cantidad_a_producir: '', fecha: new Date().toISOString().split('T')[0] });
+        fetchOrdenes();
     } catch (err) {
         setError(err.message);
     }
   };
 
-  // --- Lógica para el detalle interactivo ---
   const handleSelectOrden = async (orden) => {
     if (selectedOrden && selectedOrden.id === orden.id) {
-        setSelectedOrden(null); // Deseleccionar si se hace clic de nuevo
+        setSelectedOrden(null);
         return;
     }
     setSelectedOrden(orden);
@@ -95,23 +89,17 @@ function GestionProduccion() {
     setStockDisponible({});
     setStockAsignado({});
     setError(null);
-    
+
     try {
-        // 1. Cargar la receta para el producto de la orden
         const recetaRes = await fetch(`http://localhost:5002/api/recetas?producto_id=${orden.item_id}`);
         if (!recetaRes.ok) throw new Error('No se pudo cargar la receta.');
         const recetaData = await recetaRes.json();
         setRecetaDeOrden(recetaData);
 
-        // 2. Para cada item de la receta, cargar el stock disponible
-        const stockPromises = recetaData.map(itemReceta => {
-            const params = new URLSearchParams({
-                item_id: itemReceta.material_id,
-                status: 'DISPONIBLE,EMPEZADA'
-            });
-            return fetch(`http://localhost:5002/api/stock?${params.toString()}`).then(res => res.json());
-        });
-        
+        const stockPromises = recetaData.map(itemReceta => 
+            fetch(`http://localhost:5002/api/stock-compatible/${orden.item_id}`).then(res => res.json())
+        );
+
         const stockResults = await Promise.all(stockPromises);
         const stockMap = recetaData.reduce((acc, itemReceta, index) => {
             acc[itemReceta.id] = stockResults[index];
@@ -133,7 +121,6 @@ function GestionProduccion() {
     setError(null);
     setSuccessMessage('');
 
-    // Convertir el estado de asignación al formato que espera el backend
     const stockAssignments = Object.keys(stockAsignado).map(recetaId => ({
         recetaId: parseInt(recetaId),
         stockId: parseInt(stockAsignado[recetaId])
@@ -143,7 +130,7 @@ function GestionProduccion() {
         setError("Debes asignar un lote de stock para cada material de la receta.");
         return;
     }
-    
+
     try {
         setLoading(true);
         const response = await fetch(`http://localhost:5002/api/ordenes-produccion/${selectedOrden.id}/procesar`, {
@@ -155,8 +142,8 @@ function GestionProduccion() {
         if (!response.ok) throw new Error(data.error || 'Error al procesar la orden.');
 
         setSuccessMessage(data.mensaje);
-        setSelectedOrden(null); // Ocultar el detalle
-        fetchOrdenes(); // Recargar la lista
+        setSelectedOrden(null);
+        fetchOrdenes();
     } catch (err) {
         setError(err.message);
     } finally {
@@ -167,15 +154,12 @@ function GestionProduccion() {
 
   const isProcesarDisabled = recetaDeOrden.length === 0 || Object.keys(stockAsignado).length !== recetaDeOrden.length;
 
-
-  // --- Renderizado ---
   return (
     <div className="gestion-produccion-container">
       <h1>Módulo de Producción</h1>
       {error && <p className="error-message">{error}</p>}
       {successMessage && <p className="success-message">{successMessage}</p>}
 
-      {/* --- Formulario de creación de Orden --- */}
       <div className="form-section">
         <h2>Crear Nueva Orden de Producción</h2>
         <form onSubmit={handleCreateOrden}>
@@ -197,7 +181,6 @@ function GestionProduccion() {
         </form>
       </div>
 
-      {/* --- Listado de Órdenes de Producción --- */}
       <div className="list-section">
         <h2>Listado de Órdenes</h2>
         {loading && <p>Cargando órdenes...</p>}
@@ -223,7 +206,6 @@ function GestionProduccion() {
                   <td><span className={`status-${orden.status.toLowerCase()}`}>{orden.status}</span></td>
                   <td>{orden.coste_real_fabricacion ? parseFloat(orden.coste_real_fabricacion).toFixed(2) : '-'}</td>
                 </tr>
-                {/* --- Vista de Detalle Interactiva --- */}
                 {selectedOrden?.id === orden.id && (
                   <tr>
                     <td colSpan="6" style={{ padding: '20px', backgroundColor: '#fdfdfd' }}>
@@ -234,7 +216,7 @@ function GestionProduccion() {
                         const stockItems = stockDisponible[itemReceta.id] || [];
                         const cantidadNecesaria = itemReceta.cantidad_requerida * orden.cantidad_a_producir;
                         return (
-                          <div key={itemReceta.id} className="receta-item-row">
+                          <div key={itemReceta.id} className="receta-item-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '15px', alignItems: 'center', marginBottom: '10px' }}>
                             <span>Material: <strong>{itemReceta.material_sku}</strong> (Necesitas: {cantidadNecesaria.toFixed(2)})</span>
                             <select value={stockAsignado[itemReceta.id] || ''} onChange={(e) => handleAsignarStock(itemReceta.id, e.target.value)} required>
                               <option value="">-- Selecciona un lote de stock --</option>
@@ -247,7 +229,7 @@ function GestionProduccion() {
                           </div>
                         );
                       })}
-                      <button onClick={handleProcesarOrden} disabled={isProcesarDisabled} className="submit-btn" style={{marginTop: '15px', backgroundColor: 'var(--color-verde-primario)'}}>
+                      <button onClick={handleProcesarOrden} disabled={isProcesarDisabled || loading} className="submit-btn" style={{marginTop: '15px', backgroundColor: 'var(--color-verde-primario)'}}>
                         {loading ? 'Procesando...' : 'Confirmar y Procesar Producción'}
                       </button>
                     </td>

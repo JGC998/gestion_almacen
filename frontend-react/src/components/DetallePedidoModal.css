@@ -24,9 +24,9 @@
   font-size: 0.85em;
 }
 
-/* CAMBIO AQUI: Aplicando el color verde oscuro a la cabecera */
 .sub-table th {
-  background-color: var(--color-verde-primario); /* Verde más oscuro */
-  color: var(--color-texto-sobre-verde); /* Texto blanco para contraste */
+  /* --- CAMBIOS AQUÍ --- */
+  background-color: var(--color-verde-oscuro); /* Usamos tu variable para el verde oscuro */
+  color: var(--color-texto-sobre-verde);   /* Usamos tu variable para texto blanco */
   font-weight: 600;
 }
