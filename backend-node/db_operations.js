@@ -3,7 +3,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
-const dbPath = path.resolve(__dirname, 'almacen', 'almacen.db');
+const dbPath = path.join(__dirname, 'almacen', 'almacen.db');
 
 const conectarDB = () => {
     const db = new sqlite3.Database(dbPath, (err) => { if (err) console.error("Error conectando a la DB:", err.message); });

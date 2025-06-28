@@ -1,9 +1,14 @@
-// backend-node/server.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
+
+// --- Importar funciones de db_operations.js ---
+// (El resto de tus imports de db_operations.js va aquí, no cambian)
+const {
+    // ... (todos tus imports de db_operations)
+} = require('./db_operations.js');
 
 
 
