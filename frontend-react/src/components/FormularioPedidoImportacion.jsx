@@ -151,7 +151,7 @@ function FormularioPedidoImportacion() {
                     <fieldset key={linea.id} className="linea-item">
                         <legend>Bobina {index + 1}</legend>
                         <div className="form-grid-lineas">
-                            <label>Familia*: <select name="familia" value={linea.familia} onChange={e => handleLineaChange(linea.id, e)} required><option value="" disabled>Selecciona...</option>{familias.map(f => <option key={f.id} value={f.nombre}>{f.nombre}</option>)}</select></label>
+                            <label>Material*: <select name="familia" value={linea.familia} onChange={e => handleLineaChange(linea.id, e)} required><option value="" disabled>Selecciona...</option>{familias.map(f => <option key={f.id} value={f.nombre}>{f.nombre}</option>)}</select></label>
                             <label>Espesor*: <input type="text" name="espesor" value={linea.espesor} onChange={e => handleLineaChange(linea.id, e)} placeholder="Ej: 6mm" required /></label>
                             <label>Ancho (mm)*: <input type="number" name="ancho" value={linea.ancho} onChange={e => handleLineaChange(linea.id, e)} required /></label>
                             <label>Largo (m)*: <input type="number" step="0.01" name="largo" value={linea.largo} onChange={e => handleLineaChange(linea.id, e)} required /></label>
@@ -186,11 +186,8 @@ function FormularioPedidoImportacion() {
                 <button type="button" onClick={addGasto} className="add-btn">Añadir Gasto</button>
 
                 <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-                    <button type="button" onClick={() => handleSubmit(true)} disabled={loading} className="btn-secondary">
-                        {loading ? 'Guardando...' : 'Guardar como Borrador'}
-                    </button>
                     <button type="submit" disabled={loading} className="submit-btn" style={{marginTop: 0}}>
-                        {loading ? 'Guardando...' : 'Guardar y Procesar Stock'}
+                        {loading ? 'Guardando...' : 'Guardar y Procesar Inventario'}
                     </button>
                 </div>
             </form>

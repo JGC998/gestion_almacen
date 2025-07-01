@@ -289,6 +289,86 @@ async function findOrCreateItem(db, itemInfo) {
     return itemId;
 }
 
+// Añade esta función en backend-node/db_operations.js
+
+async function calcularPrecioFaldeta(datos, configuraciones) {
+    const { anchoFaldeta, largoFaldeta, familia, espesor, tipoCliente, cantidad, gastosSeleccionados } = datos;
+
+    // 1. OBTENER PRECIO DE VENTA DE LA MATERIA PRIMA (por metro lineal)
+    // Buscamos el item de materia prima que coincida con lo seleccionado
+    const db = conectarDB();
+    try {
+        const itemMateriaPrima = await getAsync(db,
+            `SELECT i.id, (SELECT valor FROM ValoresAtributos va JOIN ItemAtributos ia ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id AND a.nombre = 'Ancho') as ancho_bobina_mm
+             FROM Items i
+             JOIN Familias f ON i.familia_id = f.id
+             WHERE f.nombre = ? AND EXISTS (SELECT 1 FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id AND a.nombre = 'Espesor' AND va.valor = ?)
+             LIMIT 1`, [familia, espesor]
+        );
+
+        if (!itemMateriaPrima) throw new Error(`No se encontró materia prima en stock para la combinación ${familia} ${espesor}.`);
+        if (!itemMateriaPrima.ancho_bobina_mm) throw new Error(`La materia prima ${familia} ${espesor} no tiene definido un ancho de bobina.`);
+
+        // Buscamos su tarifa de venta para el tipo de cliente
+        const tarifa = await getAsync(db, `SELECT precio_venta FROM Tarifas WHERE item_id = ? AND tipo_tarifa = ?`, [itemMateriaPrima.id, tipoCliente.toUpperCase()]);
+        if (!tarifa) throw new Error(`No se encontró una tarifa de venta para el cliente '${tipoCliente}' y el material seleccionado.`);
+
+        // 2. CALCULAR COSTE DEL MATERIAL
+        const anchoBobinaMetros = parseFloat(itemMateriaPrima.ancho_bobina_mm) / 1000;
+        const precioPorMetroLineal = tarifa.precio_venta;
+        const precioPorMetroCuadrado = precioPorMetroLineal / anchoBobinaMetros;
+        const areaFaldetaMetros = (anchoFaldeta / 1000) * (largoFaldeta / 1000);
+        const costeMaterialPorFaldeta = areaFaldetaMetros * precioPorMetroCuadrado;
+
+        // 3. CALCULAR GASTOS FIJOS
+        const costesFijosConfig = configuraciones.costes_fijos;
+        let gastosFijosPorFaldeta = 0;
+        const desgloseGastos = [];
+
+        // Mano de obra (puede ser por faldeta o por metro lineal para metrajes)
+        if (tipoCliente === 'metrajes') {
+            const costeManoObra = (largoFaldeta / 1000) * costesFijosConfig.mano_obra_metro_lineal;
+            gastosFijosPorFaldeta += costeManoObra;
+            desgloseGastos.push({ nombre: 'Mano de Obra (Metraje)', coste: costeManoObra });
+        } else {
+            const costeManoObra = costesFijosConfig.mano_obra_faldeta[tipoCliente] || 0;
+            gastosFijosPorFaldeta += costeManoObra;
+            desgloseGastos.push({ nombre: 'Mano de Obra (Faldeta)', coste: costeManoObra });
+        }
+
+        // Resto de gastos fijos seleccionados
+        if (gastosSeleccionados.grabado) {
+            gastosFijosPorFaldeta += costesFijosConfig.grabado_faldeta;
+            desgloseGastos.push({ nombre: 'Grabado', coste: costesFijosConfig.grabado_faldeta });
+        }
+        if (gastosSeleccionados.troquelado) {
+            gastosFijosPorFaldeta += costesFijosConfig.troquelado_faldeta;
+            desgloseGastos.push({ nombre: 'Troquelado', coste: costesFijosConfig.troquelado_faldeta });
+        }
+
+        // 4. CALCULAR PRECIO FINAL
+        const costeTotalPorFaldeta = costeMaterialPorFaldeta + gastosFijosPorFaldeta;
+        const margen = configuraciones.margenes_venta[tipoCliente] || 0;
+        const precioVentaUnitario = costeTotalPorFaldeta * (1 + margen);
+        const precioVentaTotal = precioVentaUnitario * cantidad;
+
+        return {
+            precioUnitario: precioVentaUnitario,
+            precioTotal: precioVentaTotal,
+            desglose: {
+                costeMaterial: costeMaterialPorFaldeta,
+                costeGastosFijos: gastosFijosPorFaldeta,
+                costeTotalProduccion: costeTotalPorFaldeta,
+                margenAplicado: margen,
+                listaGastos: desgloseGastos
+            }
+        };
+
+    } finally {
+        if (db) db.close();
+    }
+}
+
 async function procesarNuevoPedido(datosCompletosPedido, configuraciones) { // <-- AÑADIDO 'configuraciones'
     const { pedido, lineas, gastos, status } = datosCompletosPedido;
     const db = conectarDB();
@@ -688,27 +768,23 @@ async function crearOrdenProduccion(ordenData) {
 }
 
 
-// REEMPLAZA la función consultarTarifas en db_operations.js
+// En backend-node/db_operations.js
+// REEMPLAZA la función consultarTarifas() con esta
 
 async function consultarTarifas() {
     const db = conectarDB();
     try {
-        // 1. Leemos los márgenes de configuración
-        const configuraciones = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'config.json'), 'utf8'));
-        const margenes = {
-            FINAL: configuraciones.margen_default_final || 0,
-            FABRICANTE: configuraciones.margen_default_fabricante || 0,
-            INTERMEDIARIO: configuraciones.margen_default_intermediario || 0,
-            METRAJES: configuraciones.margen_default_metrajes || 0,
-        };
+        const configuraciones = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+        const margenes = configuraciones.margenes_venta;
 
-        // 2. Obtenemos todos los items de materia prima con su último coste de stock
+        // En backend-node/db_operations.js, dentro de la función consultarTarifas
+
+        // BORRA la línea que empieza con 'const itemsConCoste...'
+        // Y REEMPLÁZALA por esta:
         const itemsConCoste = await allAsync(db, `
             SELECT
-                i.id,
-                i.sku,
-                i.descripcion,
-                (SELECT coste_lote FROM Stock WHERE item_id = i.id ORDER BY fecha_entrada DESC, id DESC LIMIT 1) as ultimo_coste_compra,
+                i.id, i.sku, i.descripcion,
+                (SELECT s.coste_lote FROM Stock s WHERE s.id = tr.stock_id) as coste_de_referencia,
                 (
                     SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ')
                     FROM ItemAtributos ia
@@ -717,31 +793,77 @@ async function consultarTarifas() {
                     WHERE ia.item_id = i.id
                 ) as atributos
             FROM Items i
-            WHERE i.tipo_item = 'MATERIA_PRIMA' AND EXISTS (SELECT 1 FROM Stock s WHERE s.item_id = i.id);
+            JOIN TarifaReferencias tr ON i.id = tr.item_id
+            WHERE i.tipo_item = 'MATERIA_PRIMA';
         `);
 
-        // 3. Calculamos todos los precios para cada item
         const tarifasCompletas = itemsConCoste.map(item => {
-            const coste = item.ultimo_coste_compra || 0;
+            const coste = item.coste_de_referencia || 0;
             return {
                 id: item.id,
                 sku: item.sku,
                 descripcion: item.descripcion,
                 atributos: item.atributos,
-                precio_final: coste * (1 + margenes.FINAL),
-                precio_fabricante: coste * (1 + margenes.FABRICANTE),
-                precio_intermediario: coste * (1 + margenes.INTERMEDIARIO),
-                precio_metrajes: coste * (1 + margenes.METRAJES),
+                // --- AÑADIMOS EL COSTE BASE A LA RESPUESTA ---
+                coste_referencia: coste,
+                // --- EL RESTO DEL CÁLCULO SIGUE IGUAL ---
+                precio_final: coste * (1 + (margenes.final || 0)),
+                precio_fabricante: coste * (1 + (margenes.fabricante || 0)),
+                precio_intermediario: coste * (1 + (margenes.intermediario || 0)),
+                precio_metrajes: coste * (1 + (margenes.metrajes || 0)),
             };
         });
 
-        return tarifasCompletas;
+        // --- AÑADIMOS LOS MÁRGENES A LA RESPUESTA FINAL ---
+        return {
+            tarifas: tarifasCompletas,
+            margenes: margenes
+        };
 
     } finally {
         db.close();
     }
 }
 
+// AÑADE estas 3 funciones en backend-node/db_operations.js
+
+async function consultarItemsParaTarifa() {
+    const sql = `
+        SELECT
+            i.id,
+            i.sku,
+            i.descripcion,
+            (SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ') FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id) as atributos,
+            tr.stock_id as referencia_stock_id
+        FROM Items i
+        LEFT JOIN TarifaReferencias tr ON i.id = tr.item_id
+        WHERE i.tipo_item = 'MATERIA_PRIMA'
+        ORDER BY i.sku;
+    `;
+    return await allDB(sql);
+}
+
+async function consultarStockParaItem(itemId) {
+    const sql = `
+        SELECT id, lote, coste_lote, cantidad_actual
+        FROM Stock
+        WHERE item_id = ? AND cantidad_actual > 0
+        ORDER BY fecha_entrada DESC;
+    `;
+    return await allDB(sql, [itemId]);
+}
+
+async function actualizarReferenciaTarifa(itemId, stockId) {
+    const sql = `INSERT OR REPLACE INTO TarifaReferencias (item_id, stock_id) VALUES (?, ?);`;
+    // Esta función necesita una conexión abierta para hacer el INSERT OR REPLACE
+    const db = conectarDB();
+    try {
+        const result = await runAsync(db, sql, [itemId, stockId]);
+        return result;
+    } finally {
+        db.close();
+    }
+}
 
 async function actualizarEstadoStockItem(stockItemId, nuevoEstado) {
     const estadosPermitidos = ['DISPONIBLE', 'AGOTADO', 'EMPEZADA', 'DESCATALOGADO'];
@@ -1366,16 +1488,19 @@ async function consultarStockParaTarifa() {
     `;
     return await allDB(sql);
 }
+// En backend-node/db_operations.js
+// REEMPLAZA esta función
 
 async function consultarOrdenesProduccion(filtros = {}) {
-    let sql = `SELECT op.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
+    let sql = `SELECT op.*, i.descripcion AS item_descripcion, i.sku AS item_sku
                     FROM OrdenesProduccion op
-                    JOIN ProductosTerminados pt ON op.producto_terminado_id = pt.id`;
+                    JOIN Items i ON op.item_id = i.id
+                    WHERE i.tipo_item = 'PRODUCTO_TERMINADO'`; // Filtramos para asegurarnos de que son productos terminados
     const params = [];
     const whereClauses = [];
 
     if (filtros.producto_id) {
-        whereClauses.push(`op.producto_terminado_id = ?`);
+        whereClauses.push(`op.item_id = ?`);
         params.push(filtros.producto_id);
     }
     if (filtros.fecha_desde) {
@@ -1387,13 +1512,18 @@ async function consultarOrdenesProduccion(filtros = {}) {
         params.push(filtros.fecha_hasta);
     }
 
+    // Si hay cláusulas 'where', se añaden a la query principal
     if (whereClauses.length > 0) {
-        sql += ` WHERE ${whereClauses.join(' AND ')}`;
+        sql += ` AND ${whereClauses.join(' AND ')}`;
     }
+
     sql += ` ORDER BY op.fecha DESC, op.id DESC`;
 
     return await allDB(sql, params);
 }
+
+
+
 
 async function consultarOrdenProduccionPorId(id) {
     let sql = `SELECT op.*, pt.nombre AS producto_nombre, pt.referencia AS producto_referencia
@@ -1709,29 +1839,23 @@ async function procesarOrdenProduccion(ordenProduccionId, stockAssignments, conf
     }
 }
 
+// REEMPLAZA esta función en backend-node/db_operations.js
 
-
-// --- NUEVA FUNCIÓN: Obtener materiales genéricos con su último coste ---
 async function obtenerMaterialesGenericos() {
-    // Ahora consulta las tablas correctas 'Stock' e 'Items'
     const sql = `
         SELECT
-            s.id,
+            i.id,
             i.sku,
             i.descripcion,
-            i.familia,
-            i.espesor,
-            i.ancho,
-            i.unidad_medida,
-            s.coste_lote AS coste_unitario_final
-        FROM Stock s
-        JOIN Items i ON s.item_id = i.id
-        WHERE i.tipo_item = 'MATERIA_PRIMA' AND s.id IN (
-            SELECT MAX(s2.id)
-            FROM Stock s2
-            JOIN Items i2 ON s2.item_id = i2.id
-            GROUP BY i2.sku
-        )
+            f.nombre AS familia,
+            s.coste_lote AS coste_unitario_final,
+            (SELECT va.valor FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id AND a.nombre = 'Espesor') as espesor,
+            (SELECT va.valor FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id AND a.nombre = 'Ancho') as ancho,
+            'm' AS unidad_medida
+        FROM Items i
+        JOIN Familias f ON i.familia_id = f.id
+        LEFT JOIN Stock s ON s.item_id = i.id AND s.id = (SELECT MAX(s2.id) FROM Stock s2 WHERE s2.item_id = i.id)
+        WHERE i.tipo_item = 'MATERIA_PRIMA'
         ORDER BY i.sku;
     `;
     return await allDB(sql);
@@ -1988,24 +2112,29 @@ async function crearItem(db, datosItem) {
     return itemId;
 }
 
+// En backend-node/db_operations.js
+// REEMPLAZA la función 'consultarFamiliasYEspesores' entera por esta:
 
-// AÑADIR esta nueva función en db_operations.js
 async function consultarFamiliasYEspesores() {
-    // Consultamos los items de materia prima que tienen al menos un lote en stock
     const sql = `
         SELECT DISTINCT
-            i.familia,
-            i.espesor
+            f.nombre AS familia,
+            va.valor AS espesor
         FROM Items i
+        JOIN Familias f ON i.familia_id = f.id
+        JOIN ItemAtributos ia ON i.id = ia.item_id
+        JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id
+        JOIN Atributos a ON va.atributo_id = a.id
         WHERE i.tipo_item = 'MATERIA_PRIMA'
+          AND a.nombre = 'Espesor'
           AND EXISTS (SELECT 1 FROM Stock s WHERE s.item_id = i.id)
-        ORDER BY i.familia, i.espesor;
+        ORDER BY f.nombre, va.valor;
     `;
     const rows = await allDB(sql);
 
     // Procesamos el resultado para agrupar espesores por familia
     const familias = rows.reduce((acc, row) => {
-        if (!row.familia || !row.espesor) return acc; // Ignorar si no tienen datos
+        if (!row.familia || !row.espesor) return acc;
         if (!acc[row.familia]) {
             acc[row.familia] = [];
         }
@@ -2170,13 +2299,18 @@ module.exports = {
     consultarStockCompatible,
     crearOrdenProduccion,
 
+    consultarItemsParaTarifa,      // <-- AÑADE ESTA
+    consultarStockParaItem,        // <-- AÑADE ESTA
+    actualizarReferenciaTarifa,    // <-- AÑADE ESTA
+
+
     findOrCreateItem,
     procesarNuevoPedido,
     
 
     crearItem,
     consultarTarifas,
-
+    calcularPrecioFaldeta, 
         
     consultarProveedoresUnicos,
     consultarFamilias,

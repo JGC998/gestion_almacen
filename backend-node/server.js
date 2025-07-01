@@ -1,18 +1,10 @@
+// backend-node/server.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 
-// --- Importar funciones de db_operations.js ---
-// (El resto de tus imports de db_operations.js va aquí, no cambian)
-const {
-    // ... (todos tus imports de db_operations)
-} = require('./db_operations.js');
-
-
-
-// --- Importar funciones de db_operations.js ---
 const {
     consultarStock,
     actualizarYFinalizarPedido,
@@ -23,63 +15,54 @@ const {
     eliminarPedidoCompleto,
     consultarStockAgrupado,
     consultarFamilias,
-
+    calcularPrecioFaldeta,
     consultarTarifas,
-
-    consultarStockParaTarifa, // <-- AÑADIR ESTA
-
+    consultarStockParaTarifa,
+    consultarItemsParaTarifa,
+    consultarStockParaItem,
+    actualizarReferenciaTarifa,
     crearItem,
     consultarFamiliasYEspesores,
-    consultarProveedoresUnicos, // <-- AÑADIR ESTA
+    consultarProveedoresUnicos,
     insertarProductoTerminado,
     consultarProductosTerminados,
     consultarProductoTerminadoPorId,
     actualizarProductoTerminado,
     eliminarProductoTerminado,
-
     insertarMaquinaria,
     consultarMaquinaria,
     consultarMaquinariaPorId,
     actualizarMaquinaria,
     eliminarMaquinaria,
-
     insertarReceta,
     consultarRecetas,
     consultarRecetaPorId,
     actualizarReceta,
     eliminarReceta,
-
     insertarProcesoFabricacion,
     consultarProcesosFabricacion,
     consultarProcesoFabricacionPorId,
     actualizarProcesoFabricacion,
     eliminarProcesoFabricacion,
-
     insertarOrdenProduccion,
     consultarOrdenesProduccion,
     consultarOrdenProduccionPorId,
     actualizarOrdenProduccion,
     eliminarOrdenProduccion,
     procesarOrdenProduccion,
-
-
     actualizarCosteFabricacionEstandar,
-
     consultarReferenciasStockConUltimoCoste,
     obtenerMaterialesGenericos,
     calcularPresupuestoProductoTerminado,
-    calcularCosteMaterialEspecifico, // Asegúrate de exportar esta nueva función de cálculo
-
+    calcularCosteMaterialEspecifico,
     obtenerConfiguracion,
     actualizarConfiguracion,
-
     consultarItems,
-
     conectarDB,
     runAsync
 } = require('./db_operations.js');
 
-
+// Aquí empieza el código que se queda
 const app = express();
 const PORT = process.env.PORT || 5002;
 
@@ -144,7 +127,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
 });
 
 
-// En server.js, REEMPLAZA la función crearTablasSiNoExisten entera
 
 function crearTablasSiNoExisten() {
     db.serialize(() => {
@@ -249,7 +231,6 @@ function crearTablasSiNoExisten() {
             FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE
         )`);
 
-        // En server.js, dentro de la función crearTablasSiNoExisten
 
 // ... (después del grupo "Tarifas")
 
@@ -266,6 +247,14 @@ function crearTablasSiNoExisten() {
             FOREIGN KEY(item_producido_id) REFERENCES Items(id),
             FOREIGN KEY(lote_materia_prima_id) REFERENCES Stock(id)
         )`);
+
+         db.run(`CREATE TABLE IF NOT EXISTS TarifaReferencias (
+            item_id INTEGER PRIMARY KEY,
+            stock_id INTEGER NOT NULL,
+            FOREIGN KEY(item_id) REFERENCES Items(id) ON DELETE CASCADE,
+            FOREIGN KEY(stock_id) REFERENCES Stock(id) ON DELETE CASCADE
+        )`);
+
 
         // Podríamos añadir más tablas aquí en el futuro, como para registrar mermas.
 // ...
@@ -401,6 +390,40 @@ app.get('/api/familias', async (req, res) => {
     }
 });
 
+
+// AÑADE estas 3 rutas en backend-node/server.js
+
+// Endpoint para obtener la lista de materiales para la nueva pantalla de gestión
+app.get('/api/tarifa-items', async (req, res) => {
+    try {
+        const items = await consultarItemsParaTarifa();
+        res.json(items);
+    } catch (error) {
+        res.status(500).json({ error: "Error al obtener los items para tarifas.", detalle: error.message });
+    }
+});
+
+// Endpoint para obtener los lotes de stock de un item específico
+app.get('/api/stock-para-item/:itemId', async (req, res) => {
+    try {
+        const items = await consultarStockParaItem(req.params.itemId);
+        res.json(items);
+    } catch (error) {
+        res.status(500).json({ error: "Error al obtener el stock para el item.", detalle: error.message });
+    }
+});
+
+// Endpoint para guardar la nueva referencia de precio para un item
+app.post('/api/tarifa-referencia', async (req, res) => {
+    const { itemId, stockId } = req.body;
+    try {
+        await actualizarReferenciaTarifa(itemId, stockId);
+        res.json({ mensaje: 'Referencia de tarifa actualizada con éxito.' });
+    } catch (error) {
+        res.status(500).json({ error: "Error al actualizar la referencia de tarifa.", detalle: error.message });
+    }
+});
+
 // En backend-node/server.js, añade este nuevo endpoint
 
 app.get('/api/materiales-disponibles', async (req, res) => {
@@ -485,6 +508,29 @@ function calcularCostesLinea(lineasItems, gastosItems, valorConversion = 1) {
         return { ...linea, coste_unitario_final_calculado: costeUnitarioFinalCalculado };
     });
 }
+
+
+// Añade este endpoint en backend-node/server.js
+
+app.post('/api/calculadora/precio-faldeta', async (req, res) => {
+    const datosCalculo = req.body;
+    console.log('Node.js: Solicitud a POST /api/calculadora/precio-faldeta', datosCalculo);
+
+    // Validación básica de los datos recibidos
+    if (!datosCalculo.anchoFaldeta || !datosCalculo.largoFaldeta || !datosCalculo.familia || !datosCalculo.espesor || !datosCalculo.tipoCliente || !datosCalculo.cantidad) {
+        return res.status(400).json({ error: "Faltan datos obligatorios para el cálculo." });
+    }
+
+    try {
+        // Le pasamos los datos y las configuraciones ya cargadas en 'appConfig'
+        const resultado = await calcularPrecioFaldeta(datosCalculo, appConfig);
+        res.json(resultado);
+    } catch (error) {
+        console.error("Error en el endpoint de la calculadora:", error.message);
+        // Devolvemos el mensaje de error específico (ej. "No se encontró materia prima...")
+        res.status(500).json({ error: "Error al calcular el precio.", detalle: error.message });
+    }
+});
 
 
 
@@ -613,12 +659,16 @@ app.delete('/api/pedidos/:pedidoId', async (req, res) => {
 });
 
 
+// backend-node/server.js
+
 app.get('/api/tarifas', async (req, res) => {
     try {
-        const tarifas = await consultarTarifas();
-        res.json(tarifas);
+        console.log("BACKEND: 2. Petición recibida en el endpoint /api/tarifas."); // <-- AÑADE ESTA LÍNEA
+        const resultado = await consultarTarifas();
+        res.json(resultado);
     } catch (error) {
-        res.status(500).json({ error: 'Error al obtener las tarifas.', detalle: error.message });
+        console.error("Error en endpoint /api/tarifas:", error.message); // <-- AÑADE ESTA LÍNEA
+        res.status(500).json({ error: 'Error al obtener tarifas', detalle: error.message });
     }
 });
 

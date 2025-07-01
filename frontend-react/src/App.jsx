@@ -4,13 +4,15 @@ import './App.css';
 import FormularioPedidoNacional from './components/FormularioPedidoNacional.jsx';
 import FormularioPedidoImportacion from './components/FormularioPedidoImportacion.jsx';
 import ListaPedidos from './ListaPedidos.jsx';
+import GestionTarifas from './components/GestionTarifas.jsx'; // <--- AÑADE ESTA LÍNEA
 import TarifaVenta from './components/TarifaVenta.jsx';
-import GestionProductosRecetas from './components/GestionProductosRecetas.jsx';
-import GestionMaquinaria from './components/GestionMaquinaria.jsx';
-import GestionProduccion from './components/GestionProduccion.jsx';
+//import GestionProductosRecetas from './components/GestionProductosRecetas.jsx';
+//import GestionMaquinaria from './components/GestionMaquinaria.jsx';
+//import GestionProduccion from './components/GestionProduccion.jsx';
 import FormularioConfiguracion from './components/FormularioConfiguracion.jsx';
-import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
+//import CalculadoraPresupuestos from './components/CalculadoraPresupuestos.jsx';
 import FormularioEditarPedido from './components/FormularioEditarPedido.jsx';
+import CalculadoraFaldeta from './components/CalculadoraFaldeta.jsx';
 
 function App() {
   const [stockList, setStockList] = useState([]);
@@ -79,12 +81,14 @@ function App() {
       case 'NACIONAL': return <FormularioPedidoNacional />;
       case 'LISTA_PEDIDOS': return <ListaPedidos status="COMPLETADO" onEditRequest={setPedidoAEditarId} />;
       case 'BORRADORES': return <ListaPedidos status="BORRADOR" onEditRequest={setPedidoAEditarId} />;
+      case 'GESTION_TARIFAS': return <GestionTarifas />;
       case 'TARIFA_VENTA': return <TarifaVenta />;
-      case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
+      //case 'PRODUCTOS_RECETAS': return <GestionProductosRecetas />;
       case 'IMPORTACION': return <FormularioPedidoImportacion />;
-      case 'MAQUINARIA': return <GestionMaquinaria />;
-      case 'PRODUCCION': return <GestionProduccion />;
-      case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
+      //case 'MAQUINARIA': return <GestionMaquinaria />;
+      //case 'PRODUCCION': return <GestionProduccion />;
+      //case 'CALCULADORA_PRESUPUESTOS': return <CalculadoraPresupuestos />;
+      case 'CALCULADORA_FALDETA': return <CalculadoraFaldeta />; 
       case 'CONFIGURACION': return <FormularioConfiguracion />;
 
       case 'STOCK':
@@ -147,20 +151,22 @@ function App() {
             <h3>Materias Primas y Stock</h3>
             <button onClick={() => setVistaActual('STOCK')} disabled={vistaActual === 'STOCK'}>Ver Stock</button>
             <button onClick={() => setVistaActual('LISTA_PEDIDOS')} disabled={vistaActual === 'LISTA_PEDIDOS'}>Ver Pedidos</button>
+            <button onClick={() => setVistaActual('GESTION_TARIFAS')} disabled={vistaActual === 'GESTION_TARIFAS'}>Gestionar Precios</button>
             <button onClick={() => setVistaActual('TARIFA_VENTA')} disabled={vistaActual === 'TARIFA_VENTA'}>Ver Tarifa Venta</button>
             <button onClick={() => setVistaActual('NACIONAL')} disabled={vistaActual === 'NACIONAL'}>Nuevo Pedido Nacional</button>
             <button onClick={() => setVistaActual('IMPORTACION')} disabled={vistaActual === 'IMPORTACION'}>Nuevo Pedido Importación</button>
-            <button onClick={() => setVistaActual('BORRADORES')} disabled={vistaActual === 'BORRADORES'}>Borradores</button>
+            {/*<button onClick={() => setVistaActual('BORRADORES')} disabled={vistaActual === 'BORRADORES'}>Borradores</button>*/}
         </div>
-        <div className="sidebar-section">
+        {/*<div className="sidebar-section">
             <h3>Fabricación</h3>
             <button onClick={() => setVistaActual('PRODUCTOS_RECETAS')} disabled={vistaActual === 'PRODUCTOS_RECETAS'}>Gestión de Artículos</button>
             <button onClick={() => setVistaActual('MAQUINARIA')} disabled={vistaActual === 'MAQUINARIA'}>Gestión Maquinaria</button>
             <button onClick={() => setVistaActual('PRODUCCION')} disabled={vistaActual === 'PRODUCCION'}>Gestión de Producción</button>
-        </div>
+        </div>*/}
         <div className="sidebar-section">
             <h3>Herramientas</h3>
-            <button onClick={() => setVistaActual('CALCULADORA_PRESUPUESTOS')} disabled={vistaActual === 'CALCULADORA_PRESUPUESTOS'}>Calculadora Presupuestos</button>
+            <button onClick={() => setVistaActual('CALCULADORA_FALDETA')} disabled={vistaActual === 'CALCULADORA_FALDETA'}>Calculadora Faldetas</button> {/* <-- 3. AÑADE ESTE BOTÓN */}
+            {/*<button onClick={() => setVistaActual('CALCULADORA_PRESUPUESTOS')} disabled={vistaActual === 'CALCULADORA_PRESUPUESTOS'}>Calculadora Presupuestos</button>*/}
             <button onClick={() => setVistaActual('CONFIGURACION')} disabled={vistaActual === 'CONFIGURACION'}>Configuración</button>
         </div>
       </nav>

@@ -175,7 +175,7 @@ function FormularioPedidoNacional() {
                     <fieldset key={linea.id} className="linea-item">
                         <legend>Bobina {index + 1}</legend>
                         <div className="form-grid-lineas">
-                            <label>Familia*:
+                            <label>Material*:
                                 <select name="familia" value={linea.familia} onChange={e => handleLineaChange(linea.id, e)} required>
                                     <option value="" disabled>Selecciona...</option>
                                     {familias.map(f => <option key={f.id} value={f.nombre}>{f.nombre}</option>)}

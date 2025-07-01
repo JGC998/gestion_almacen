@@ -1,8 +1,19 @@
 {
-  "margen_default_final": 0.7,
-  "margen_default_fabricante": 0.3,
-  "margen_default_metrajes": 0.6,
-  "margen_default_intermediario": 0.2,
-  "coste_mano_obra_default": 50,
-  "coste_mano_obra_por_metro_metraje": 0.15
+  "margenes_venta": {
+    "final": 0.70,
+    "fabricante": 0.30,
+    "metrajes": 0.60,
+    "intermediario": 0.20
+  },
+  "costes_fijos": {
+    "mano_obra_faldeta": {
+      "final": 1.50,
+      "fabricante": 0.80,
+      "metrajes": 1.50,
+      "intermediario": 1.20
+    },
+    "mano_obra_metro_lineal": 0.25,
+    "grabado_faldeta": 2.50,
+    "troquelado_faldeta": 3.00
+  }
 }
