@@ -827,13 +827,20 @@ async function consultarTarifas() {
 
 // AÑADE estas 3 funciones en backend-node/db_operations.js
 
+// En backend-node/db_operations.js
+// REEMPLAZA esta función
+
 async function consultarItemsParaTarifa() {
     const sql = `
         SELECT
             i.id,
             i.sku,
             i.descripcion,
-            (SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ') FROM ItemAtributos ia JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id JOIN Atributos a ON va.atributo_id = a.id WHERE ia.item_id = i.id) as atributos,
+            (SELECT GROUP_CONCAT(a.nombre || ': ' || va.valor, '; ')
+             FROM ItemAtributos ia
+             JOIN ValoresAtributos va ON ia.valor_atributo_id = va.id
+             JOIN Atributos a ON va.atributo_id = a.id
+             WHERE ia.item_id = i.id) as atributos,
             tr.stock_id as referencia_stock_id
         FROM Items i
         LEFT JOIN TarifaReferencias tr ON i.id = tr.item_id
